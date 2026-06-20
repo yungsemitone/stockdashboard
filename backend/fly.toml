@@ -5,7 +5,7 @@
 # IMPORTANT: change `app` to a globally-unique name before first launch
 # (or let `fly launch` set it for you).
 
-app = "CHANGE-ME-markets-backend"
+app = "stockdashboard"
 primary_region = "iad" # pick one near you: https://fly.io/docs/reference/regions/
 
 [build]
