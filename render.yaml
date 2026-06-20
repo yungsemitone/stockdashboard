@@ -1,0 +1,25 @@
+# Render Blueprint for the backend (FastAPI). The frontend deploys separately
+# on Vercel. After connecting this repo on render.com, set the secret env vars
+# (marked sync:false) in the dashboard — they never live in the repo.
+services:
+  - type: web
+    name: markets-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter # always-on; the data scheduler needs to keep running
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: TWELVE_DATA_API_KEY
+        sync: false # set in dashboard
+      - key: ANTHROPIC_API_KEY
+        sync: false # set in dashboard
+      - key: CORS_ORIGINS
+        sync: false # set to your Vercel URL, e.g. https://your-app.vercel.app
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1

@@ -1,0 +1,101 @@
+"""The default set of instruments the app tracks, grouped by asset class.
+
+Symbols are Yahoo Finance tickers:
+  - "^" prefix  -> an index or rate (e.g. ^GSPC = S&P 500, ^TNX = 10y yield)
+  - "=F" suffix -> a futures contract (e.g. GC=F = gold, CL=F = WTI crude)
+  - plain        -> an equity or ETF (e.g. AAPL, TLT)
+
+This is just the starting watchlist. It will become user-editable later.
+"""
+
+UNIVERSE: dict[str, list[str]] = {
+    "stocks": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM"],
+    "indices": ["^GSPC", "^DJI", "^IXIC", "^RUT", "^VIX", "^FTSE", "^N225", "^GDAXI"],
+    "commodities": ["GC=F", "SI=F", "CL=F", "BZ=F", "NG=F", "HG=F", "ZC=F", "ZW=F"],
+    "bonds": ["^TNX", "^FVX", "^TYX", "^IRX", "TLT", "IEF", "SHY", "LQD"],
+    "currencies": [
+        "DX-Y.NYB",
+        "EURUSD=X",
+        "GBPUSD=X",
+        "USDJPY=X",
+        "USDCHF=X",
+        "AUDUSD=X",
+        "USDCAD=X",
+        "USDCNY=X",
+    ],
+}
+
+# Human-friendly names for display.
+NAMES: dict[str, str] = {
+    # Stocks
+    "AAPL": "Apple",
+    "MSFT": "Microsoft",
+    "GOOGL": "Alphabet (Google)",
+    "AMZN": "Amazon",
+    "NVDA": "NVIDIA",
+    "META": "Meta Platforms",
+    "TSLA": "Tesla",
+    "JPM": "JPMorgan Chase",
+    # Indices
+    "^GSPC": "S&P 500",
+    "^DJI": "Dow Jones Industrial Average",
+    "^IXIC": "Nasdaq Composite",
+    "^RUT": "Russell 2000",
+    "^VIX": "CBOE Volatility Index (VIX)",
+    "^FTSE": "FTSE 100 (UK)",
+    "^N225": "Nikkei 225 (Japan)",
+    "^GDAXI": "DAX (Germany)",
+    # Commodities
+    "GC=F": "Gold",
+    "SI=F": "Silver",
+    "CL=F": "Crude Oil (WTI)",
+    "BZ=F": "Crude Oil (Brent)",
+    "NG=F": "Natural Gas",
+    "HG=F": "Copper",
+    "ZC=F": "Corn",
+    "ZW=F": "Wheat",
+    # Bonds / rates
+    "^TNX": "US 10-Year Treasury Yield",
+    "^FVX": "US 5-Year Treasury Yield",
+    "^TYX": "US 30-Year Treasury Yield",
+    "^IRX": "US 13-Week T-Bill Yield",
+    "TLT": "iShares 20+ Year Treasury Bond ETF",
+    "IEF": "iShares 7-10 Year Treasury Bond ETF",
+    "SHY": "iShares 1-3 Year Treasury Bond ETF",
+    "LQD": "iShares Investment Grade Corporate Bond ETF",
+    # Currencies
+    "DX-Y.NYB": "US Dollar Index (DXY)",
+    "EURUSD=X": "Euro / US Dollar",
+    "GBPUSD=X": "British Pound / US Dollar",
+    "USDJPY=X": "US Dollar / Japanese Yen",
+    "USDCHF=X": "US Dollar / Swiss Franc",
+    "AUDUSD=X": "Australian Dollar / US Dollar",
+    "USDCAD=X": "US Dollar / Canadian Dollar",
+    "USDCNY=X": "US Dollar / Chinese Yuan",
+}
+
+# A few asset classes (rates, the VIX) are quoted as levels, not prices in $.
+LEVEL_SYMBOLS = {"^TNX", "^FVX", "^TYX", "^IRX", "^VIX", "DX-Y.NYB"}
+
+# FX pairs are shown with more decimal places.
+FX_SYMBOLS = {s for syms in [["EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCHF=X",
+                              "AUDUSD=X", "USDCAD=X", "USDCNY=X"]] for s in syms}
+
+ASSET_CLASS_LABELS = {
+    "stocks": "Stocks",
+    "indices": "Indices",
+    "commodities": "Commodities",
+    "bonds": "Bonds & Rates",
+    "currencies": "Currencies",
+}
+
+
+def name_for(symbol: str) -> str:
+    return NAMES.get(symbol, symbol)
+
+
+def class_for(symbol: str) -> str | None:
+    for cls, syms in UNIVERSE.items():
+        if symbol in syms:
+            return cls
+    return None
