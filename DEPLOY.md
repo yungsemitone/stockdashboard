@@ -77,11 +77,35 @@ Fly redeploys automatically when secrets change. Open your Vercel URL — the
 dashboard loads live data and prices tick in real time (WebSocket runs over
 `wss://` automatically).
 
-## Updating later
+## Updating later (auto-deploy on push)
 
-- **Frontend:** `git push` → Vercel auto-redeploys.
-- **Backend:** `cd backend && fly deploy` (or wire up a GitHub Action later for
-  push-to-deploy).
+Both halves redeploy on `git push` to `main`:
+
+- **Frontend:** Vercel auto-redeploys (built in).
+- **Backend:** a GitHub Action (`.github/workflows/fly-deploy.yml`) deploys to
+  Fly. **One-time setup** — create a deploy token and add it as a repo secret:
+  ```bash
+  cd backend
+  fly tokens create deploy -x 8760h    # prints a token (valid 1 year)
+  ```
+  On GitHub: repo → **Settings → Secrets and variables → Actions → New
+  repository secret** → name `FLY_API_TOKEN`, value = that token.
+  After that, any push touching `backend/` deploys automatically (or trigger it
+  from the **Actions** tab). Until the token is set, deploy manually:
+  `cd backend && fly deploy`.
+
+## Custom domain (optional)
+
+Needs a domain you own (any registrar).
+
+1. **Vercel** → project → **Settings → Domains** → add your domain and follow
+   the DNS records it shows you (set them at your registrar).
+2. Let the backend accept it (every `*.vercel.app` URL is already allowed, but a
+   custom domain must be added explicitly):
+   ```bash
+   cd backend
+   fly secrets set CORS_ORIGINS="https://yourdomain.com,https://www.yourdomain.com"
+   ```
 
 ---
 

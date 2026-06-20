@@ -17,7 +17,8 @@ from ..config import settings
 from . import market
 
 _cache: dict[str, tuple[float, dict]] = {}
-_TTL = 3600
+_TTL_GOOD = 6 * 3600  # keep a successful reading for hours
+_TTL_EMPTY = 180  # recheck "no coverage" / failures every few minutes
 
 
 def _distribution(t: yf.Ticker) -> dict | None:
@@ -59,21 +60,11 @@ def _distribution(t: yf.Ticker) -> dict | None:
     }
 
 
-def consensus(symbol: str) -> dict:
-    hit = _cache.get(symbol)
-    if hit:
-        # Cache real results for an hour, but recheck "unavailable" every few
-        # minutes so a transient yfinance hiccup doesn't hide it for an hour.
-        ttl = _TTL if hit[1].get("available") else 180
-        if time.time() - hit[0] < ttl:
-            return hit[1]
-
+def _build(symbol: str) -> dict:
     t = yf.Ticker(symbol)
     dist = _distribution(t)
     if dist is None:
-        result = {"symbol": symbol, "available": False}
-        _cache[symbol] = (time.time(), result)
-        return result
+        return {"symbol": symbol, "available": False}
 
     try:
         info = t.info
@@ -114,8 +105,38 @@ def consensus(symbol: str) -> dict:
         "upside_pct": upside,
     }
     result.update(_narrative(result, info))
-    _cache[symbol] = (time.time(), result)
     return result
+
+
+def consensus(symbol: str) -> dict:
+    now = time.time()
+    hit = _cache.get(symbol)
+    if hit:
+        ttl = _TTL_GOOD if hit[1].get("available") else _TTL_EMPTY
+        if now - hit[0] < ttl:
+            return hit[1]
+
+    try:
+        result = _build(symbol)
+    except Exception:
+        result = {"symbol": symbol, "available": False}
+
+    # Stale-while-error: yfinance gets throttled from cloud IPs, so a transient
+    # failure must NOT blank a reading we already have — keep the last good one.
+    if not result.get("available") and hit and hit[1].get("available"):
+        return hit[1]
+
+    _cache[symbol] = (now, result)
+    return result
+
+
+def warm(symbols: list[str]) -> None:
+    """Pre-fetch analyst data (used by the scheduler so default stocks are ready)."""
+    for s in symbols:
+        try:
+            consensus(s)
+        except Exception:
+            pass
 
 
 def _fallback(r: dict) -> dict:

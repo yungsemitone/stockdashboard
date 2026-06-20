@@ -22,7 +22,10 @@ app = FastAPI(title="Stock Scraper API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
+    # Explicit origins (localhost + any custom domain you add to CORS_ORIGINS)...
     allow_origins=settings.cors_origin_list,
+    # ...plus every Vercel deployment (production + per-commit preview URLs).
+    allow_origin_regex=r"https://[a-z0-9-]+\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

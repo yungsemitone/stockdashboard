@@ -8,14 +8,17 @@ data is never more than one interval stale.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from .providers import market
+from . import universe
+from .providers import analyst, market
 
 log = logging.getLogger("scheduler")
 
 REFRESH_SECONDS = 60
+ANALYST_WARM_SECONDS = 1800  # keep default stocks' analyst data fresh & cached
 
 _scheduler: BackgroundScheduler | None = None
 
@@ -33,12 +36,29 @@ def _refresh() -> None:
         log.warning("refresh failed: %s", e)
 
 
+def _warm_analyst() -> None:
+    try:
+        analyst.warm(universe.UNIVERSE.get("stocks", []))
+        log.info("analyst data warmed")
+    except Exception as e:
+        log.warning("analyst warm failed: %s", e)
+
+
 def start() -> None:
     global _scheduler
     if _scheduler is not None:
         return
     _scheduler = BackgroundScheduler(daemon=True)
     _scheduler.add_job(_refresh, "interval", seconds=REFRESH_SECONDS, id="refresh")
+    # Warm analyst data shortly after boot, then keep it fresh. Runs off the
+    # request path so detail pages always have it cached (and survive throttles).
+    _scheduler.add_job(
+        _warm_analyst,
+        "interval",
+        seconds=ANALYST_WARM_SECONDS,
+        id="warm_analyst",
+        next_run_time=datetime.now() + timedelta(seconds=15),
+    )
     _scheduler.start()
     log.info("scheduler started (every %ss)", REFRESH_SECONDS)
 

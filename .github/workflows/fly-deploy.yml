@@ -1,0 +1,23 @@
+name: Deploy backend to Fly
+
+# Auto-deploys the FastAPI backend to Fly.io whenever backend code changes on
+# main. Requires a repo secret FLY_API_TOKEN (see DEPLOY.md).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/fly-deploy.yml"
+  workflow_dispatch: {} # lets you trigger a deploy manually from the Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency: deploy-group # avoid overlapping deploys
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only
+        working-directory: backend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
