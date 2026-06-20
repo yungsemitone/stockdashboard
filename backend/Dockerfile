@@ -3,7 +3,12 @@ FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    # Force UTF-8 everywhere — the slim image's default C locale is ASCII, which
+    # breaks encoding non-ASCII chars (…, —) in Anthropic prompts.
+    PYTHONUTF8=1 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
 WORKDIR /app
 
