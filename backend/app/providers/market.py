@@ -197,12 +197,35 @@ def _quote_from_series(symbol: str, s: pd.Series | None) -> dict:
     return {**base, "price": last, "change": change, "change_pct": pct}
 
 
+def realtime_quotes(symbols: list[str]) -> dict[str, dict]:
+    """Real-time prices for the TD-backed subset (short cache — polled often)."""
+    if not twelvedata.enabled() or not symbols:
+        return {}
+    key = "rtq:" + ",".join(symbols)
+    return _cached(key, 5, lambda: twelvedata.quotes(symbols))  # type: ignore[return-value]
+
+
 def get_overview() -> dict[str, list[dict]]:
-    """Snapshot quote (price + today's change) for every tracked instrument."""
+    """Snapshot quote (price + today's change) for every tracked instrument.
+
+    Stocks/FX/metals get real-time Twelve Data prices overlaid on the daily-close
+    base; indices/commodities/bonds come from the (yfinance) daily series.
+    """
     out: dict[str, list[dict]] = {}
     for cls, syms in universe.UNIVERSE.items():
         closes = _batch_closes(syms, "5d", "1d")
-        out[cls] = [_quote_from_series(s, closes.get(s)) for s in syms]
+        rtq = realtime_quotes(syms)
+        items = []
+        for s in syms:
+            q = _quote_from_series(s, closes.get(s))
+            r = rtq.get(s)
+            if r and r.get("price") is not None:
+                q["price"] = r["price"]
+                if r.get("change_pct") is not None:
+                    q["change"] = r.get("change")
+                    q["change_pct"] = r["change_pct"]
+            items.append(q)
+        out[cls] = items
     return out
 
 

@@ -31,6 +31,13 @@ def overview():
     return market.get_overview()
 
 
+@router.get("/quotes")
+def quotes(symbols: str = ""):
+    """Real-time prices for a comma-separated symbol list (for live polling)."""
+    syms = [s.strip() for s in symbols.split(",") if s.strip()]
+    return {"quotes": market.realtime_quotes(syms)}
+
+
 @router.get("/summary")
 def summary(scope: str = "day", asset_class: str | None = None):
     if scope not in ("day", "week", "month"):

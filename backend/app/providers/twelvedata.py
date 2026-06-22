@@ -119,6 +119,44 @@ def quote(yahoo: str) -> dict | None:
 # /statistics endpoint is gated to higher plan tiers (returns 403 here).
 
 
+def quotes(yahoo_symbols: list[str]) -> dict[str, dict]:
+    """Real-time batch quotes for TD-mapped symbols → {yahoo: {price,change,change_pct}}."""
+    mapped: dict[str, str] = {}
+    for y in yahoo_symbols:
+        ts = td_symbol(y)
+        if ts:
+            mapped[y] = ts
+    if not mapped:
+        return {}
+    rev: dict[str, str] = {}
+    for y, ts in mapped.items():
+        rev.setdefault(ts, y)
+    try:
+        d = _get("quote", {"symbol": ",".join(rev.keys())})
+    except Exception:
+        return {}
+
+    out: dict[str, dict] = {}
+
+    def take(obj, y):
+        if isinstance(obj, dict) and obj.get("close") is not None:
+            out[y] = {
+                "price": _f(obj.get("close")),
+                "change": _f(obj.get("change")),
+                "change_pct": _f(obj.get("percent_change")),
+            }
+
+    if "close" in d or d.get("status") == "error":
+        if "close" in d:
+            take(d, next(iter(rev.values())))
+    else:
+        for ts, obj in d.items():
+            y = rev.get(ts)
+            if y:
+                take(obj, y)
+    return out
+
+
 def _series(values) -> pd.Series:
     if not values:
         return pd.Series(dtype="float64")

@@ -193,6 +193,10 @@ const sym = (s: string) => encodeURIComponent(s);
 
 export const api = {
   overview: () => get<Overview>("/api/overview"),
+  quotes: (symbols: string[]) =>
+    get<{ quotes: Record<string, { price: number | null; change: number | null; change_pct: number | null }> }>(
+      `/api/quotes?symbols=${symbols.map(encodeURIComponent).join(",")}`,
+    ),
   summary: (scope: string) => get<Summary>(`/api/summary?scope=${scope}`),
   macro: (scope: string) => get<Macro>(`/api/macro?scope=${scope}`),
   quote: (symbol: string) => get<QuoteDetail>(`/api/quote/${sym(symbol)}`),

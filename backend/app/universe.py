@@ -102,9 +102,37 @@ INDEX_FEED = {
 }
 
 
+def _et_now():
+    """Current US Eastern time (handles EDT/EST without a tz database)."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+
+    def first_sunday(month: int) -> datetime:
+        d = datetime(now.year, month, 1, tzinfo=timezone.utc)
+        return d + timedelta(days=(6 - d.weekday()) % 7)
+
+    # US DST: 2nd Sunday of March → 1st Sunday of November (≈2am ET).
+    dst_start = (first_sunday(3) + timedelta(weeks=1)).replace(hour=7)
+    dst_end = first_sunday(11).replace(hour=6)
+    offset = -4 if dst_start <= now < dst_end else -5
+    return now + timedelta(hours=offset)
+
+
+def us_cash_market_open() -> bool:
+    et = _et_now()
+    if et.weekday() >= 5:  # Sat/Sun
+        return False
+    minutes = et.hour * 60 + et.minute
+    return 9 * 60 + 30 <= minutes < 16 * 60  # 9:30am–4:00pm ET
+
+
 def feed_symbol(symbol: str) -> str:
-    """The symbol to actually fetch price data from (futures for mapped indices)."""
-    return INDEX_FEED.get(symbol, symbol)
+    """Where to fetch price data: the cash index during US market hours (so it
+    matches what everyone quotes), the 24h futures when the cash market is shut."""
+    if symbol in INDEX_FEED and not us_cash_market_open():
+        return INDEX_FEED[symbol]
+    return symbol
 
 
 def name_for(symbol: str) -> str:

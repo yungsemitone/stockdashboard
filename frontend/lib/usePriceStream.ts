@@ -1,50 +1,45 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { API_URL } from "./api";
+import { api } from "./api";
 
 /**
- * Subscribe to live price ticks for a set of Yahoo symbols via the backend's
- * WebSocket proxy. Returns a map of symbol -> latest streamed price. Symbols the
- * data feed doesn't cover simply never tick (callers keep their polled value).
+ * Live prices for a set of symbols, by polling the backend's real-time quotes
+ * every few seconds. (We poll instead of using a WebSocket because the Twelve
+ * Data plan only allows 1 streaming symbol, whereas the REST API is unlimited —
+ * so polling lets *every* symbol update.) Returns symbol -> latest price.
  */
 export function usePriceStream(symbols: string[]): Record<string, number> {
   const [prices, setPrices] = useState<Record<string, number>>({});
   const key = symbols.slice().sort().join(",");
+  const symbolsRef = useRef(symbols);
+  symbolsRef.current = symbols;
 
   useEffect(() => {
-    if (!symbols.length) return;
-    const wsUrl = API_URL.replace(/^http/, "ws") + "/ws/prices";
-    let closed = false;
-    let ws: WebSocket | null = null;
-    let reconnect: ReturnType<typeof setTimeout> | undefined;
+    if (symbols.length === 0) return;
+    let active = true;
 
-    const connect = () => {
-      if (closed) return;
-      ws = new WebSocket(wsUrl);
-      ws.onopen = () => ws?.send(JSON.stringify({ symbols }));
-      ws.onmessage = (e) => {
-        try {
-          const d = JSON.parse(e.data);
-          const price = typeof d.price === "string" ? parseFloat(d.price) : d.price;
-          if (d.symbol && typeof price === "number" && !Number.isNaN(price)) {
-            setPrices((p) => (p[d.symbol] === price ? p : { ...p, [d.symbol]: price }));
+    const poll = async () => {
+      try {
+        const { quotes } = await api.quotes(symbolsRef.current);
+        if (!active) return;
+        setPrices((prev) => {
+          const next = { ...prev };
+          for (const [sym, q] of Object.entries(quotes)) {
+            if (q && typeof q.price === "number") next[sym] = q.price;
           }
-        } catch {
-          /* ignore */
-        }
-      };
-      ws.onclose = () => {
-        if (!closed) reconnect = setTimeout(connect, 3000);
-      };
-      ws.onerror = () => ws?.close();
+          return next;
+        });
+      } catch {
+        /* keep last prices on a failed poll */
+      }
     };
 
-    connect();
+    poll();
+    const id = setInterval(poll, 5000);
     return () => {
-      closed = true;
-      if (reconnect) clearTimeout(reconnect);
-      ws?.close();
+      active = false;
+      clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
