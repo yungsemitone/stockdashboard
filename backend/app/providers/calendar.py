@@ -34,6 +34,16 @@ IMPLICATIONS = {
     "pce": "Core PCE, the Fed's preferred inflation gauge. Moves rate-cut odds more than any other inflation print.",
     "claims": "Weekly initial jobless claims — a timely pulse on the labor market.",
     "sentiment": "U. Michigan Consumer Sentiment — a leading gauge of household confidence and spending.",
+    "gdp": "GDP — the broadest scorecard on the economy. Above-trend growth supports earnings; a contraction signals recession.",
+    "ism_mfg": "ISM Manufacturing PMI — above 50 = factories expanding, below 50 = contracting. A leading growth gauge.",
+    "ism_svc": "ISM Services PMI — services are ~70% of the economy, so this is one of the most important growth reads.",
+    "jolts": "JOLTS Job Openings — how many jobs employers are trying to fill. The Fed watches it for labor-market tightness.",
+    "adp": "ADP Employment — private-payrolls estimate two days before the official jobs report; an early read on hiring.",
+    "durable": "Durable Goods Orders — orders for big-ticket items (cars, planes, machinery); a gauge of business investment.",
+    "confidence": "Consumer Confidence (Conference Board) — how upbeat households feel; confident consumers spend more.",
+    "housing": "Housing Starts & Building Permits — new home construction; sensitive to interest rates and a growth bellwether.",
+    "home_sales": "Existing Home Sales — the bulk of the housing market; reflects affordability and the impact of mortgage rates.",
+    "trade": "Trade Balance — exports minus imports; feeds GDP and signals global demand and the dollar's effect.",
 }
 
 _cache: tuple[float, list[dict]] | None = None
@@ -81,12 +91,24 @@ def upcoming(days_ahead: int = 45) -> list[dict]:
         add(d, "FOMC Rate Decision", "high", "fomc", time_et="2:00 PM ET")
 
     for yy, mm in _months_ahead(today, 2):
-        add(_first_friday(yy, mm), "Jobs Report (Nonfarm Payrolls)", "high", "nfp", time_et="8:30 AM ET")
+        nfp = _first_friday(yy, mm)
+        add(nfp, "Jobs Report (Nonfarm Payrolls)", "high", "nfp", time_et="8:30 AM ET")
+        # ADP lands the Wednesday before the Friday jobs report.
+        add(nfp - timedelta(days=2), "ADP Employment", "medium", "adp", time_et="8:15 AM ET")
+        add(_approx(yy, mm, 1), "ISM Manufacturing PMI", "high", "ism_mfg", approximate=True, time_et="10:00 AM ET")
+        add(_approx(yy, mm, 3), "ISM Services PMI", "high", "ism_svc", approximate=True, time_et="10:00 AM ET")
+        add(_approx(yy, mm, 5), "Trade Balance", "low", "trade", approximate=True, time_et="8:30 AM ET")
+        add(_approx(yy, mm, 4), "JOLTS Job Openings", "medium", "jolts", approximate=True, time_et="10:00 AM ET")
         add(_approx(yy, mm, 12), "CPI Inflation", "high", "cpi", approximate=True, time_et="8:30 AM ET")
         add(_approx(yy, mm, 13), "PPI Inflation", "medium", "ppi", approximate=True, time_et="8:30 AM ET")
         add(_approx(yy, mm, 16), "Retail Sales", "medium", "retail", approximate=True, time_et="8:30 AM ET")
-        add(_approx(yy, mm, 28), "Core PCE Price Index", "high", "pce", approximate=True, time_et="8:30 AM ET")
+        add(_approx(yy, mm, 18), "Housing Starts & Permits", "low", "housing", approximate=True, time_et="8:30 AM ET")
+        add(_approx(yy, mm, 20), "Existing Home Sales", "low", "home_sales", approximate=True, time_et="10:00 AM ET")
+        add(_approx(yy, mm, 24), "Durable Goods Orders", "medium", "durable", approximate=True, time_et="8:30 AM ET")
+        add(_approx(yy, mm, 27), "Consumer Confidence", "medium", "confidence", approximate=True, time_et="10:00 AM ET")
         add(_approx(yy, mm, 27), "Consumer Sentiment", "low", "sentiment", approximate=True)
+        add(_approx(yy, mm, 28), "Core PCE Price Index", "high", "pce", approximate=True, time_et="8:30 AM ET")
+        add(_approx(yy, mm, 28), "GDP (quarterly)", "high", "gdp", approximate=True, time_et="8:30 AM ET")
 
     d = today
     while d <= horizon:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, CLASS_ORDER, CLASS_LABELS, type Overview, type Summary } from "@/lib/api";
 import { usePoll } from "@/lib/usePoll";
 import { usePriceStream } from "@/lib/usePriceStream";
@@ -21,6 +21,15 @@ export default function Home() {
   );
   const { data: summary } = usePoll<Summary>(() => api.summary(scope), 60_000, [scope]);
 
+  // Ticking clock so the "updated Xs ago" freshness indicator counts up live.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const ageSec = updatedAt ? Math.round((now - updatedAt) / 1000) : null;
+  const fresh = ageSec != null && ageSec < 90;
+
   const allSymbols = useMemo(
     () => (overview ? Object.values(overview).flat().map((q) => q.symbol) : []),
     [overview],
@@ -32,12 +41,27 @@ export default function Home() {
       <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Market Dashboard</h1>
-          <p className="text-neutral-500 text-sm mt-1">
-            Live stocks, indices, commodities, bonds &amp; currencies
-            {updatedAt && (
-              <> · updated {new Date(updatedAt).toLocaleTimeString()}</>
+          <div className="flex items-center gap-2 text-sm mt-1">
+            <span className="text-neutral-500">
+              Live stocks, indices, commodities, bonds &amp; currencies
+            </span>
+            {ageSec != null && (
+              <span
+                className={`inline-flex items-center gap-1.5 ${
+                  fresh ? "text-emerald-400" : "text-amber-400"
+                }`}
+                title={`Data last refreshed ${new Date(updatedAt!).toLocaleTimeString()}`}
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    fresh ? "bg-emerald-400 animate-pulse" : "bg-amber-400"
+                  }`}
+                />
+                {fresh ? "Live" : "Stale"} · updated{" "}
+                {ageSec < 60 ? `${ageSec}s` : `${Math.round(ageSec / 60)}m`} ago
+              </span>
             )}
-          </p>
+          </div>
         </div>
         <ScopeTabs scope={scope} onChange={setScope} />
       </div>
