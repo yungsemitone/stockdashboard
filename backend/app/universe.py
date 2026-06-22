@@ -10,7 +10,7 @@ This is just the starting watchlist. It will become user-editable later.
 
 UNIVERSE: dict[str, list[str]] = {
     "stocks": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM"],
-    "indices": ["^GSPC", "^DJI", "^IXIC", "^RUT", "^VIX", "^FTSE", "^N225", "^GDAXI"],
+    "indices": ["^GSPC", "^DJI", "^NDX", "^RUT", "^VIX", "^FTSE", "^N225", "^GDAXI"],
     "commodities": ["GC=F", "SI=F", "CL=F", "BZ=F", "NG=F", "HG=F", "ZC=F", "ZW=F"],
     "bonds": ["^TNX", "^FVX", "^TYX", "^IRX", "TLT", "IEF", "SHY", "LQD"],
     "currencies": [
@@ -40,6 +40,7 @@ NAMES: dict[str, str] = {
     "^GSPC": "S&P 500",
     "^DJI": "Dow Jones Industrial Average",
     "^IXIC": "Nasdaq Composite",
+    "^NDX": "Nasdaq 100",
     "^RUT": "Russell 2000",
     "^VIX": "CBOE Volatility Index (VIX)",
     "^FTSE": "FTSE 100 (UK)",
@@ -88,6 +89,22 @@ ASSET_CLASS_LABELS = {
     "bonds": "Bonds & Rates",
     "currencies": "Currencies",
 }
+
+# Price/chart data for these indices is pulled from their E-mini FUTURES, which
+# trade nearly 24 hours (Sun evening–Fri evening) — so the value reflects
+# overnight/weekend moves instead of being frozen at the last cash-session close.
+# The instrument keeps its index identity (name, symbol); only the feed changes.
+INDEX_FEED = {
+    "^GSPC": "ES=F",  # S&P 500 E-mini
+    "^DJI": "YM=F",  # Dow E-mini
+    "^NDX": "NQ=F",  # Nasdaq-100 E-mini
+    "^RUT": "RTY=F",  # Russell 2000 E-mini
+}
+
+
+def feed_symbol(symbol: str) -> str:
+    """The symbol to actually fetch price data from (futures for mapped indices)."""
+    return INDEX_FEED.get(symbol, symbol)
 
 
 def name_for(symbol: str) -> str:

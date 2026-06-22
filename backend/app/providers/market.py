@@ -105,11 +105,12 @@ def get_history(symbol: str, rng: str = "6mo") -> list[dict]:
     period, interval = RANGE_MAP.get(rng, RANGE_MAP["6mo"])
 
     def fn() -> list[dict]:
+        fs = universe.feed_symbol(symbol)  # futures feed for mapped indices
         if twelvedata.enabled():
-            td = twelvedata.candles(symbol, rng)
+            td = twelvedata.candles(fs, rng)
             if td:
                 return td
-        df = yf.Ticker(symbol).history(
+        df = yf.Ticker(fs).history(
             period=period, interval=interval, auto_adjust=False
         )
         out: list[dict] = []
@@ -153,9 +154,11 @@ def _batch_closes(symbols: list[str], period: str, interval: str) -> dict[str, p
         if not remaining:
             return result
 
-        # Fallback: yfinance for the rest.
+        # Fallback: yfinance for the rest. Mapped indices are fetched from their
+        # futures feed but stored under the original index symbol.
+        feed = {s: universe.feed_symbol(s) for s in remaining}
         data = yf.download(
-            remaining,
+            list(feed.values()),
             period=period,
             interval=interval,
             progress=False,
@@ -166,7 +169,7 @@ def _batch_closes(symbols: list[str], period: str, interval: str) -> dict[str, p
         if isinstance(data.columns, pd.MultiIndex):
             for s in remaining:
                 try:
-                    result[s] = data[s]["Close"].dropna()
+                    result[s] = data[feed[s]]["Close"].dropna()
                 except Exception:
                     result[s] = pd.Series(dtype="float64")
         else:
@@ -299,9 +302,12 @@ def get_quote(symbol: str) -> dict:
     """Rich snapshot for one instrument (used by its detail page)."""
 
     def fn() -> dict:
+        # Identity stays the index; price data comes from its futures feed.
+        fs = universe.feed_symbol(symbol)
+
         # Primary: Twelve Data real-time quote.
         if twelvedata.enabled():
-            td = twelvedata.quote(symbol)
+            td = twelvedata.quote(fs)
             if td and td.get("price") is not None:
                 return {
                     "symbol": symbol,
@@ -313,7 +319,7 @@ def get_quote(symbol: str) -> dict:
                     **td,
                 }
 
-        t = yf.Ticker(symbol)
+        t = yf.Ticker(fs)
         try:
             fi = dict(t.fast_info)
         except Exception:
