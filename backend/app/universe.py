@@ -128,11 +128,8 @@ def us_cash_market_open() -> bool:
 
 
 def feed_symbol(symbol: str) -> str:
-    """Where to fetch price data: the cash index during US market hours (so it
-    matches what everyone quotes), the 24h futures when the cash market is shut."""
-    if symbol in INDEX_FEED and not us_cash_market_open():
-        return INDEX_FEED[symbol]
-    return symbol
+    """Always fetch mapped indices from their 24h futures feed (per user pref)."""
+    return INDEX_FEED.get(symbol, symbol)
 
 
 def name_for(symbol: str) -> str:

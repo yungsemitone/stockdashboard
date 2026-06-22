@@ -202,7 +202,7 @@ def realtime_quotes(symbols: list[str]) -> dict[str, dict]:
     if not twelvedata.enabled() or not symbols:
         return {}
     key = "rtq:" + ",".join(symbols)
-    return _cached(key, 5, lambda: twelvedata.quotes(symbols))  # type: ignore[return-value]
+    return _cached(key, 2, lambda: twelvedata.quotes(symbols))  # type: ignore[return-value]
 
 
 def get_overview() -> dict[str, list[dict]]:

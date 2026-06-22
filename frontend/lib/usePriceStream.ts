@@ -36,7 +36,7 @@ export function usePriceStream(symbols: string[]): Record<string, number> {
     };
 
     poll();
-    const id = setInterval(poll, 5000);
+    const id = setInterval(poll, 3000);
     return () => {
       active = false;
       clearInterval(id);

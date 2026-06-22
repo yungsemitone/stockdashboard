@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 import yfinance as yf
 
@@ -19,6 +20,37 @@ from . import market
 _cache: dict[str, tuple[float, dict]] = {}
 _TTL_GOOD = 6 * 3600  # keep a successful reading for hours
 _TTL_EMPTY = 180  # recheck "no coverage" / failures every few minutes
+
+# Persist good readings to disk so they survive deploys (the in-memory cache is
+# wiped on every restart, which is why the panel kept vanishing) and ride out
+# yfinance throttling from the cloud.
+_DISK = (
+    Path(settings.data_dir)
+    if settings.data_dir
+    else Path(__file__).resolve().parent.parent.parent / "data"
+) / "analyst_cache.json"
+
+
+def _load_disk() -> None:
+    try:
+        data = json.loads(_DISK.read_text())
+        for sym, res in data.items():
+            if isinstance(res, dict) and res.get("available"):
+                _cache[sym] = (0.0, res)  # ts=0 → stale-but-good; refreshes on access
+    except Exception:
+        pass
+
+
+def _save_disk() -> None:
+    try:
+        good = {s: r for s, (_, r) in _cache.items() if r.get("available")}
+        _DISK.parent.mkdir(parents=True, exist_ok=True)
+        _DISK.write_text(json.dumps(good))
+    except Exception:
+        pass
+
+
+_load_disk()
 
 
 def _distribution(t: yf.Ticker) -> dict | None:
@@ -127,6 +159,8 @@ def consensus(symbol: str) -> dict:
         return hit[1]
 
     _cache[symbol] = (now, result)
+    if result.get("available"):
+        _save_disk()
     return result
 
 
