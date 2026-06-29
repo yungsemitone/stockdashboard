@@ -1,16 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { chatStream } from "@/lib/api";
 
 type ChatMsg = { role: "user" | "assistant"; content: string };
 const STORAGE = "claude-chat-v1";
+
+const CHIPS = [
+  "Compare my watchlist",
+  "What's moving today?",
+  "What's on the economic calendar this week?",
+  "How's the economy looking right now?",
+];
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -36,28 +44,42 @@ export default function ChatWidget() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, loading, open]);
 
-  const send = async () => {
-    const text = input.trim();
+  const sendText = async (raw: string) => {
+    const text = raw.trim();
     if (!text || loading) return;
     const next: ChatMsg[] = [...messages, { role: "user", content: text }];
-    setMessages(next);
+    setMessages([...next, { role: "assistant", content: "" }]);
     setInput("");
     setLoading(true);
+    setStatus(null);
     setError(null);
+    let acc = "";
     try {
-      const { reply } = await api.chat(next);
-      setMessages([...next, { role: "assistant", content: reply }]);
+      await chatStream(next, (e) => {
+        if (e.type === "delta" && e.text) {
+          acc += e.text;
+          setStatus(null);
+          setMessages([...next, { role: "assistant", content: acc }]);
+        } else if (e.type === "status") {
+          setStatus(e.text ?? null);
+        } else if (e.type === "error") {
+          setError(e.text ?? "Something went wrong.");
+        }
+      });
+      if (!acc) setMessages(next); // nothing came back; drop the empty bubble
     } catch {
+      setMessages(next);
       setError("Couldn't reach Claude — try again in a moment.");
     } finally {
       setLoading(false);
+      setStatus(null);
     }
   };
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      send();
+      sendText(input);
     }
   };
 
@@ -98,34 +120,52 @@ export default function ChatWidget() {
 
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
             {messages.length === 0 && (
-              <p className="text-sm text-neutral-500 mt-2">
-                Ask me about the markets, a specific ticker, the economy — or
-                anything else. I can see your live dashboard data.
-              </p>
+              <div className="mt-1 space-y-3">
+                <p className="text-sm text-neutral-500">
+                  Ask me about the markets, a ticker, the economy — or anything
+                  else. I can read your live dashboard and search the web.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {CHIPS.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => sendText(c)}
+                      className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-600 hover:text-white transition"
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-              >
+            {messages.map((m, i) =>
+              m.content.trim() || m.role === "user" ? (
                 <div
-                  className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
-                    m.role === "user"
-                      ? "bg-neutral-700 text-neutral-50"
-                      : "bg-neutral-900 border border-neutral-800 text-neutral-200"
-                  }`}
+                  key={i}
+                  className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
                 >
-                  {m.content}
+                  <div
+                    className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
+                      m.role === "user"
+                        ? "bg-neutral-700 text-neutral-50"
+                        : "bg-neutral-900 border border-neutral-800 text-neutral-200"
+                    }`}
+                  >
+                    {m.content}
+                  </div>
                 </div>
-              </div>
-            ))}
-            {loading && (
-              <div className="flex justify-start">
-                <div className="rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-500">
-                  Thinking…
-                </div>
-              </div>
+              ) : null,
             )}
+            {loading &&
+              (status ||
+                !messages[messages.length - 1]?.content?.trim()) && (
+                <div className="flex justify-start">
+                  <div className="inline-flex items-center gap-2 rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-500">
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    {status || "Thinking…"}
+                  </div>
+                </div>
+              )}
             {error && <p className="text-sm text-rose-400">{error}</p>}
           </div>
 
@@ -140,7 +180,7 @@ export default function ChatWidget() {
                 className="flex-1 resize-none rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-neutral-600 max-h-28"
               />
               <button
-                onClick={send}
+                onClick={() => sendText(input)}
                 disabled={loading || !input.trim()}
                 className="rounded-lg bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-40"
               >

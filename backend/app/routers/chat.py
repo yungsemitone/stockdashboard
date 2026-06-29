@@ -13,6 +13,7 @@ import time
 from collections import defaultdict
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..config import settings
@@ -136,6 +137,20 @@ def _run_tool(name: str, inp: dict) -> dict:
     return {"error": f"unknown tool {name}"}
 
 
+def _status_for(name: str, inp: dict) -> str:
+    sym = (inp or {}).get("symbol")
+    return {
+        "get_watchlists": "Checking your watchlist…",
+        "get_market_overview": "Scanning the markets…",
+        "get_quote": f"Getting {sym} quote…" if sym else "Getting a quote…",
+        "get_analyst_consensus": f"Pulling analyst targets for {sym}…" if sym else "Pulling analyst targets…",
+        "get_economic_indicators": "Reading the economic data…",
+        "get_economic_calendar": "Checking the calendar…",
+        "get_news": "Reading the news…",
+        "search_symbols": "Searching tickers…",
+    }.get(name, "Working…")
+
+
 SYSTEM = (
     "You are Claude, embedded as a chat assistant inside the user's personal live "
     "markets dashboard. Talk naturally, like a sharp, friendly markets-savvy friend.\n\n"
@@ -149,8 +164,13 @@ SYSTEM = (
     "fetch each one's data and compare.\n\n"
     "Reply in plain conversational text suitable for a small chat window — avoid markdown "
     "symbols like **, ##, or bullet characters. Be concise unless asked for depth. You are "
-    "not a licensed financial advisor; for personalized buy/sell decisions, add a brief note."
+    "not a licensed financial advisor; for personalized buy/sell decisions, add a brief note. "
+    "Don't narrate that you're about to use a tool — just use it, then give the answer."
 )
+
+
+def _sse(obj: dict) -> str:
+    return f"data: {json.dumps(obj)}\n\n"
 
 
 @router.post("/chat")
@@ -172,47 +192,54 @@ def chat(req: ChatRequest, request: Request):
     if not messages:
         raise HTTPException(400, "Nothing to send.")
 
-    try:
-        import anthropic
+    def stream():
+        try:
+            import anthropic
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        final_text = ""
+            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            for _ in range(6):  # agentic loop until a final answer
+                with client.messages.stream(
+                    model=settings.chat_model,
+                    max_tokens=2048,
+                    system=SYSTEM,
+                    tools=TOOLS,
+                    messages=messages,
+                ) as s:
+                    for event in s:
+                        et = getattr(event, "type", "")
+                        if et == "content_block_start":
+                            if getattr(getattr(event, "content_block", None), "name", "") == "web_search":
+                                yield _sse({"type": "status", "text": "Searching the web…"})
+                        elif et == "content_block_delta":
+                            d = getattr(event, "delta", None)
+                            if getattr(d, "type", "") == "text_delta":
+                                yield _sse({"type": "delta", "text": d.text})
+                    final = s.get_final_message()
 
-        for _ in range(6):  # agentic loop: tool calls until a final answer
-            resp = client.messages.create(
-                model=settings.chat_model,
-                max_tokens=2048,
-                system=SYSTEM,
-                tools=TOOLS,
-                messages=messages,
-            )
-            text = "".join(
-                getattr(b, "text", "") for b in resp.content if getattr(b, "type", "") == "text"
-            ).strip()
-            if text:
-                final_text = text
+                if final.stop_reason != "tool_use":
+                    break
 
-            if resp.stop_reason != "tool_use":
-                break
+                messages.append({"role": "assistant", "content": final.content})
+                results = []
+                for block in final.content:
+                    if getattr(block, "type", "") == "tool_use":
+                        yield _sse({"type": "status", "text": _status_for(block.name, block.input or {})})
+                        try:
+                            out = _run_tool(block.name, block.input or {})
+                        except Exception as e:
+                            out = {"error": str(e)}
+                        results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": json.dumps(out, default=str)[:9000],
+                        })
+                messages.append({"role": "user", "content": results})
+        except Exception:
+            yield _sse({"type": "error", "text": "Claude couldn't respond just now — try again."})
+        yield _sse({"type": "done"})
 
-            # Run the client-side tools Claude requested, feed results back.
-            messages.append({"role": "assistant", "content": resp.content})
-            results = []
-            for block in resp.content:
-                if getattr(block, "type", "") == "tool_use":
-                    try:
-                        out = _run_tool(block.name, block.input or {})
-                    except Exception as e:  # surface to Claude, don't crash
-                        out = {"error": str(e)}
-                    results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": json.dumps(out, default=str)[:9000],
-                    })
-            messages.append({"role": "user", "content": results})
-
-        return {"reply": final_text or "(no response)"}
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(502, "Claude couldn't respond just now — try again in a moment.")
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

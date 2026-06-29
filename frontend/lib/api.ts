@@ -215,8 +215,6 @@ export const api = {
   article: (id: string) => get<ArticleDetail>(`/api/article/${sym(id)}`),
   movers: (scope: string) => get<MoversPayload>(`/api/movers?scope=${scope}`),
   analysis: (symbol: string) => get<Analysis>(`/api/analysis/${sym(symbol)}`),
-  chat: (messages: { role: string; content: string }[]) =>
-    send<{ reply: string }>("POST", "/api/chat", { messages }),
   watchlists: () => get<WatchlistsPayload>("/api/watchlists"),
   watchlistCreate: (name: string) =>
     send<WatchlistsPayload>("POST", "/api/watchlists", { name }),
@@ -232,6 +230,41 @@ export const api = {
       `/api/watchlists/${sym(name)}/items/${sym(symbol)}`,
     ),
 };
+
+export type ChatEvent = { type: "delta" | "status" | "error" | "done"; text?: string };
+
+/** Streams the agentic chat reply: calls onEvent for each delta/status/error. */
+export async function chatStream(
+  messages: { role: string; content: string }[],
+  onEvent: (e: ChatEvent) => void,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages }),
+  });
+  if (!res.ok || !res.body) throw new Error(`${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const part of parts) {
+      const line = part.trim();
+      if (line.startsWith("data:")) {
+        try {
+          onEvent(JSON.parse(line.slice(5).trim()));
+        } catch {
+          /* ignore malformed event */
+        }
+      }
+    }
+  }
+}
 
 export const CLASS_ORDER = [
   "stocks",
