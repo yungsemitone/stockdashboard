@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str | None = None
     narrative_model: str = "claude-sonnet-4-6"
+    chat_model: str = "claude-sonnet-4-6"
     fred_api_key: str | None = None
     finnhub_api_key: str | None = None
     twelve_data_api_key: str | None = None

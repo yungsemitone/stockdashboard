@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Nav from "@/components/Nav";
+import ChatWidget from "@/components/ChatWidget";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -35,8 +36,22 @@ export default function RootLayout({
         <div className="flex-1">{children}</div>
 
         <footer className="border-t border-neutral-800 py-4 text-center text-xs text-neutral-600">
-          Data via Yahoo Finance &amp; FRED · for personal research, not investment advice
+          <span>
+            Data via Yahoo Finance &amp; FRED · for personal research, not
+            investment advice
+          </span>
+          <span className="mx-2 text-neutral-700">·</span>
+          <a
+            href="https://dad-dashboard.fly.dev"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-neutral-500 hover:text-neutral-300"
+          >
+            The Morning Desk ↗
+          </a>
         </footer>
+
+        <ChatWidget />
       </body>
     </html>
   );

@@ -215,6 +215,8 @@ export const api = {
   article: (id: string) => get<ArticleDetail>(`/api/article/${sym(id)}`),
   movers: (scope: string) => get<MoversPayload>(`/api/movers?scope=${scope}`),
   analysis: (symbol: string) => get<Analysis>(`/api/analysis/${sym(symbol)}`),
+  chat: (messages: { role: string; content: string }[]) =>
+    send<{ reply: string }>("POST", "/api/chat", { messages }),
   watchlists: () => get<WatchlistsPayload>("/api/watchlists"),
   watchlistCreate: (name: string) =>
     send<WatchlistsPayload>("POST", "/api/watchlists", { name }),
