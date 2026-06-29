@@ -21,6 +21,7 @@ export default function ChatWidget() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     try {
@@ -53,28 +54,42 @@ export default function ChatWidget() {
     setLoading(true);
     setStatus(null);
     setError(null);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     let acc = "";
     try {
-      await chatStream(next, (e) => {
-        if (e.type === "delta" && e.text) {
-          acc += e.text;
-          setStatus(null);
-          setMessages([...next, { role: "assistant", content: acc }]);
-        } else if (e.type === "status") {
-          setStatus(e.text ?? null);
-        } else if (e.type === "error") {
-          setError(e.text ?? "Something went wrong.");
-        }
-      });
+      await chatStream(
+        next,
+        (e) => {
+          if (e.type === "delta" && e.text) {
+            acc += e.text;
+            setStatus(null);
+            setMessages([...next, { role: "assistant", content: acc }]);
+          } else if (e.type === "status") {
+            setStatus(e.text ?? null);
+          } else if (e.type === "error") {
+            setError(e.text ?? "Something went wrong.");
+          }
+        },
+        ctrl.signal,
+      );
       if (!acc) setMessages(next); // nothing came back; drop the empty bubble
-    } catch {
-      setMessages(next);
-      setError("Couldn't reach Claude — try again in a moment.");
+    } catch (e) {
+      if ((e as { name?: string })?.name === "AbortError") {
+        // User stopped it — keep whatever streamed so far.
+        if (!acc) setMessages(next);
+      } else {
+        setMessages(next);
+        setError("Couldn't reach Claude — try again in a moment.");
+      }
     } finally {
       setLoading(false);
       setStatus(null);
+      abortRef.current = null;
     }
   };
+
+  const stop = () => abortRef.current?.abort();
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -179,13 +194,23 @@ export default function ChatWidget() {
                 placeholder="Message Claude…"
                 className="flex-1 resize-none rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-neutral-600 max-h-28"
               />
-              <button
-                onClick={() => sendText(input)}
-                disabled={loading || !input.trim()}
-                className="rounded-lg bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-40"
-              >
-                Send
-              </button>
+              {loading ? (
+                <button
+                  onClick={stop}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-700"
+                >
+                  <span className="inline-block h-2.5 w-2.5 rounded-[2px] bg-neutral-300" />
+                  Stop
+                </button>
+              ) : (
+                <button
+                  onClick={() => sendText(input)}
+                  disabled={!input.trim()}
+                  className="rounded-lg bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-40"
+                >
+                  Send
+                </button>
+              )}
             </div>
             <p className="mt-1.5 text-[10px] text-neutral-600">
               Claude can make mistakes. Not financial advice.

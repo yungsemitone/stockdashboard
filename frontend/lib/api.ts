@@ -237,11 +237,13 @@ export type ChatEvent = { type: "delta" | "status" | "error" | "done"; text?: st
 export async function chatStream(
   messages: { role: string; content: string }[],
   onEvent: (e: ChatEvent) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch(`${API_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages }),
+    signal,
   });
   if (!res.ok || !res.body) throw new Error(`${res.status}`);
   const reader = res.body.getReader();
