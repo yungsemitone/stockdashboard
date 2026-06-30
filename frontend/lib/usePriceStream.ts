@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { useRefresh } from "./settings";
 
 /**
  * Live prices for a set of symbols, by polling the backend's real-time quotes
@@ -11,6 +12,7 @@ import { api } from "./api";
  */
 export function usePriceStream(symbols: string[]): Record<string, number> {
   const [prices, setPrices] = useState<Record<string, number>>({});
+  const { price: intervalMs } = useRefresh();
   const key = symbols.slice().sort().join(",");
   const symbolsRef = useRef(symbols);
   symbolsRef.current = symbols;
@@ -36,13 +38,13 @@ export function usePriceStream(symbols: string[]): Record<string, number> {
     };
 
     poll();
-    const id = setInterval(poll, 3000);
+    const id = setInterval(poll, intervalMs);
     return () => {
       active = false;
       clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, intervalMs]);
 
   return prices;
 }

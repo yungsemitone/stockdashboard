@@ -1,5 +1,7 @@
 // Typed client for the FastAPI backend.
 
+import { getChatSettings, getIndicesMode } from "./settings";
+
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
 
@@ -190,18 +192,20 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 const sym = (s: string) => encodeURIComponent(s);
+// Appended to endpoints whose index values depend on the futures/cash setting.
+const idx = () => `indices=${getIndicesMode()}`;
 
 export const api = {
-  overview: () => get<Overview>("/api/overview"),
+  overview: () => get<Overview>(`/api/overview?${idx()}`),
   quotes: (symbols: string[]) =>
     get<{ quotes: Record<string, { price: number | null; change: number | null; change_pct: number | null }> }>(
       `/api/quotes?symbols=${symbols.map(encodeURIComponent).join(",")}`,
     ),
-  summary: (scope: string) => get<Summary>(`/api/summary?scope=${scope}`),
+  summary: (scope: string) => get<Summary>(`/api/summary?scope=${scope}&${idx()}`),
   macro: (scope: string) => get<Macro>(`/api/macro?scope=${scope}`),
-  quote: (symbol: string) => get<QuoteDetail>(`/api/quote/${sym(symbol)}`),
+  quote: (symbol: string) => get<QuoteDetail>(`/api/quote/${sym(symbol)}?${idx()}`),
   history: (symbol: string, range: string) =>
-    get<History>(`/api/history/${sym(symbol)}?range=${range}`),
+    get<History>(`/api/history/${sym(symbol)}?range=${range}&${idx()}`),
   search: (q: string) =>
     get<{ results: SearchResult[] }>(`/api/search?q=${encodeURIComponent(q)}`),
   news: () => get<{ articles: Article[] }>("/api/news"),
@@ -213,7 +217,7 @@ export const api = {
   convert: (base: string, quote: string, amount: number) =>
     get<ConvertResult>(`/api/convert?base=${base}&quote=${quote}&amount=${amount}`),
   article: (id: string) => get<ArticleDetail>(`/api/article/${sym(id)}`),
-  movers: (scope: string) => get<MoversPayload>(`/api/movers?scope=${scope}`),
+  movers: (scope: string) => get<MoversPayload>(`/api/movers?scope=${scope}&${idx()}`),
   analysis: (symbol: string) => get<Analysis>(`/api/analysis/${sym(symbol)}`),
   watchlists: () => get<WatchlistsPayload>("/api/watchlists"),
   watchlistCreate: (name: string) =>
@@ -239,10 +243,15 @@ export async function chatStream(
   onEvent: (e: ChatEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  const chat = getChatSettings();
   const res = await fetch(`${API_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({
+      messages,
+      web_search: chat.webSearch,
+      model: chat.model,
+    }),
     signal,
   });
   if (!res.ok || !res.body) throw new Error(`${res.status}`);

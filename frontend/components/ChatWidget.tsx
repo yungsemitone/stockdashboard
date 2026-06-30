@@ -45,6 +45,13 @@ export default function ChatWidget() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, loading, open]);
 
+  // Settings → "Clear chat history" fires this; reset even if the panel is open.
+  useEffect(() => {
+    const onClear = () => setMessages([]);
+    window.addEventListener("chat:clear", onClear);
+    return () => window.removeEventListener("chat:clear", onClear);
+  }, []);
+
   const sendText = async (raw: string) => {
     const text = raw.trim();
     if (!text || loading) return;

@@ -127,9 +127,34 @@ def us_cash_market_open() -> bool:
     return 9 * 60 + 30 <= minutes < 16 * 60  # 9:30am–4:00pm ET
 
 
+import contextvars
+
+# Per-request indices feed mode: "futures" (24h), "cash" (matches investing.com),
+# or "auto" (cash during US market hours, futures when closed). Endpoints set it
+# from the ?indices= query param.
+_indices_mode: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "indices_mode", default="futures"
+)
+
+
+def set_indices_mode(mode: str) -> None:
+    _indices_mode.set(mode if mode in ("futures", "cash", "auto") else "futures")
+
+
+def indices_mode() -> str:
+    return _indices_mode.get()
+
+
 def feed_symbol(symbol: str) -> str:
-    """Always fetch mapped indices from their 24h futures feed (per user pref)."""
-    return INDEX_FEED.get(symbol, symbol)
+    """Where to fetch a mapped index's price data, per the indices-mode setting."""
+    if symbol not in INDEX_FEED:
+        return symbol
+    mode = _indices_mode.get()
+    if mode == "cash":
+        return symbol
+    if mode == "auto":
+        return symbol if us_cash_market_open() else INDEX_FEED[symbol]
+    return INDEX_FEED[symbol]  # "futures" (default)
 
 
 def name_for(symbol: str) -> str:

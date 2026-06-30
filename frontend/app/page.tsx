@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, CLASS_ORDER, CLASS_LABELS, type Overview, type Summary } from "@/lib/api";
 import { usePoll } from "@/lib/usePoll";
 import { usePriceStream } from "@/lib/usePriceStream";
+import { useRefresh, useSetting } from "@/lib/settings";
 import ScopeTabs, { type Scope } from "@/components/ScopeTabs";
 import MacroPanel from "@/components/MacroPanel";
 import MoversNews from "@/components/MoversNews";
@@ -13,13 +14,20 @@ import EconCalendar from "@/components/EconCalendar";
 
 export default function Home() {
   const [scope, setScope] = useState<Scope>("day");
+  const refresh = useRefresh();
+  // Re-fetch immediately when the indices feed (futures/cash/auto) is changed.
+  const indicesMode = useSetting("indicesMode", "futures");
 
   const { data: overview, error: ovErr, updatedAt } = usePoll<Overview>(
     () => api.overview(),
-    30_000,
-    [],
+    refresh.overview,
+    [indicesMode],
   );
-  const { data: summary } = usePoll<Summary>(() => api.summary(scope), 60_000, [scope]);
+  const { data: summary } = usePoll<Summary>(
+    () => api.summary(scope),
+    60_000,
+    [scope, indicesMode],
+  );
 
   // Ticking clock so the "updated Xs ago" freshness indicator counts up live.
   const [now, setNow] = useState(() => Date.now());

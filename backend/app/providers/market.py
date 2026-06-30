@@ -128,7 +128,8 @@ def get_history(symbol: str, rng: str = "6mo") -> list[dict]:
             )
         return out
 
-    return _cached(f"hist:{symbol}:{rng}", 60, fn)  # type: ignore[return-value]
+    mode = f":{universe.indices_mode()}" if symbol in universe.INDEX_FEED else ""
+    return _cached(f"hist:{symbol}:{rng}{mode}", 60, fn)  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +178,10 @@ def _batch_closes(symbols: list[str], period: str, interval: str) -> dict[str, p
             result[remaining[0]] = series
         return result
 
-    key = f"batch:{','.join(symbols)}:{period}:{interval}"
+    # Only vary the cache key by indices-mode when an index is in the batch, so
+    # stock/commodity batches stay shared across modes.
+    mode = f":{universe.indices_mode()}" if any(s in universe.INDEX_FEED for s in symbols) else ""
+    key = f"batch:{','.join(symbols)}:{period}:{interval}{mode}"
     return _cached(key, 45, fn)  # type: ignore[return-value]
 
 
@@ -389,7 +393,8 @@ def get_quote(symbol: str) -> dict:
             "currency": fi.get("currency"),
         }
 
-    return _cached(f"quote:{symbol}", 30, fn)  # type: ignore[return-value]
+    mode = f":{universe.indices_mode()}" if symbol in universe.INDEX_FEED else ""
+    return _cached(f"quote:{symbol}{mode}", 30, fn)  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------

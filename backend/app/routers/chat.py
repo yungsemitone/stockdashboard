@@ -31,6 +31,8 @@ class Msg(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[Msg]
+    web_search: bool = True
+    model: str = "fast"  # "fast" | "deep"
 
 
 _hits: dict[str, list[float]] = defaultdict(list)
@@ -48,7 +50,7 @@ def _rate_ok(ip: str) -> bool:
 
 # --- Tools Claude can call -------------------------------------------------
 
-TOOLS = [
+DASHBOARD_TOOLS = [
     {
         "name": "get_watchlists",
         "description": "The user's saved watchlists (named lists of tickers) with each holding's current price and today's % change.",
@@ -104,8 +106,14 @@ TOOLS = [
             "required": ["query"],
         },
     },
-    {"type": "web_search_20250305", "name": "web_search", "max_uses": 5},
 ]
+
+# Web search is an Anthropic server tool; kept separate so Settings can toggle it.
+WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
+TOOLS = DASHBOARD_TOOLS + [WEB_SEARCH_TOOL]
+
+# "fast" is the everyday model; "deep" trades latency for a stronger model.
+CHAT_MODELS = {"fast": settings.chat_model, "deep": "claude-opus-4-8"}
 
 
 def _run_tool(name: str, inp: dict) -> dict:
@@ -192,6 +200,9 @@ def chat(req: ChatRequest, request: Request):
     if not messages:
         raise HTTPException(400, "Nothing to send.")
 
+    tools = DASHBOARD_TOOLS + ([WEB_SEARCH_TOOL] if req.web_search else [])
+    model_id = CHAT_MODELS.get(req.model, settings.chat_model)
+
     def stream():
         try:
             import anthropic
@@ -199,10 +210,10 @@ def chat(req: ChatRequest, request: Request):
             client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
             for _ in range(6):  # agentic loop until a final answer
                 with client.messages.stream(
-                    model=settings.chat_model,
+                    model=model_id,
                     max_tokens=2048,
                     system=SYSTEM,
-                    tools=TOOLS,
+                    tools=tools,
                     messages=messages,
                 ) as s:
                     for event in s:

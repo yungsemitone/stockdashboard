@@ -26,8 +26,9 @@ def get_universe():
 
 
 @router.get("/overview")
-def overview():
+def overview(indices: str = "futures"):
     """Snapshot of every instrument (price + today's change), by class."""
+    universe.set_indices_mode(indices)
     return market.get_overview()
 
 
@@ -39,9 +40,10 @@ def quotes(symbols: str = ""):
 
 
 @router.get("/summary")
-def summary(scope: str = "day", asset_class: str | None = None):
+def summary(scope: str = "day", asset_class: str | None = None, indices: str = "futures"):
     if scope not in ("day", "week", "month"):
         raise HTTPException(400, "scope must be one of: day, week, month")
+    universe.set_indices_mode(indices)
     return market.get_summary(scope, asset_class)
 
 
@@ -72,9 +74,10 @@ def article(article_id: str):
 
 
 @router.get("/movers")
-def movers(scope: str = "day", limit: int = 6):
+def movers(scope: str = "day", limit: int = 6, indices: str = "futures"):
     if scope not in ("day", "week", "month"):
         raise HTTPException(400, "scope must be one of: day, week, month")
+    universe.set_indices_mode(indices)
     summary = market.get_summary(scope)
     flat: list[dict] = []
     for cls, data in summary.items():
@@ -108,7 +111,8 @@ def convert(base: str, quote: str, amount: float = 1.0):
 
 
 @router.get("/quote/{symbol:path}")
-def quote(symbol: str):
+def quote(symbol: str, indices: str = "futures"):
+    universe.set_indices_mode(indices)
     return market.get_quote(symbol)
 
 
@@ -123,9 +127,10 @@ def symbol_news(symbol: str, limit: int = 8):
 
 
 @router.get("/history/{symbol:path}")
-def history(symbol: str, range: str = "6mo"):
+def history(symbol: str, range: str = "6mo", indices: str = "futures"):
     if range not in market.RANGE_MAP:
         raise HTTPException(
             400, f"range must be one of: {', '.join(market.RANGE_MAP)}"
         )
+    universe.set_indices_mode(indices)
     return {"symbol": symbol, "range": range, "candles": market.get_history(symbol, range)}

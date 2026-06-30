@@ -1,19 +1,80 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { readSetting, writeSetting } from "@/lib/settings";
 
 type Theme = "dark" | "light";
 
+type Opt = { value: string; label: string };
+
+/** A compact segmented control (the same look as the theme toggle). */
+function Segmented({
+  options,
+  value,
+  onChange,
+}: {
+  options: Opt[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="inline-flex w-full rounded-lg border border-neutral-800 bg-neutral-950 p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          onClick={() => onChange(o.value)}
+          className={`flex-1 rounded-md px-2 py-1.5 text-xs transition ${
+            value === o.value
+              ? "bg-neutral-700 text-white"
+              : "text-neutral-400 hover:text-neutral-200"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Section({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-4 last:mb-0">
+      <div className="mb-1.5 text-xs font-semibold text-neutral-400">{title}</div>
+      {children}
+      {hint && <p className="mt-1.5 text-[11px] leading-snug text-neutral-600">{hint}</p>}
+    </div>
+  );
+}
+
 export default function SettingsMenu() {
   const [open, setOpen] = useState(false);
-  const [theme, setTheme] = useState<Theme>("dark");
   const ref = useRef<HTMLDivElement>(null);
 
+  // Theme lives in a cookie (read by the server for no-flash SSR); the rest are
+  // localStorage settings read through the settings module.
+  const [theme, setTheme] = useState<Theme>("dark");
+  const [indices, setIndices] = useState("futures");
+  const [refresh, setRefresh] = useState("live");
+  const [webSearch, setWebSearch] = useState(true);
+  const [model, setModel] = useState("fast");
+  const [cleared, setCleared] = useState(false);
+
   useEffect(() => {
-    // Reflect whatever the server already applied (from the theme cookie).
     setTheme(
       document.documentElement.classList.contains("theme-light") ? "light" : "dark",
     );
+    setIndices(readSetting("indicesMode", "futures"));
+    setRefresh(readSetting("refreshRate", "live"));
+    setWebSearch(readSetting("chatWebSearch", "on") !== "off");
+    setModel(readSetting("chatModel", "fast"));
   }, []);
 
   useEffect(() => {
@@ -24,11 +85,32 @@ export default function SettingsMenu() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  const apply = (t: Theme) => {
+  const applyTheme = (t: Theme) => {
     setTheme(t);
-    // Persist for SSR on the next load, and flip instantly now.
     document.cookie = `theme=${t}; path=/; max-age=31536000; SameSite=Lax`;
     document.documentElement.classList.toggle("theme-light", t === "light");
+  };
+
+  const applyIndices = (v: string) => {
+    setIndices(v);
+    writeSetting("indicesMode", v);
+  };
+  const applyRefresh = (v: string) => {
+    setRefresh(v);
+    writeSetting("refreshRate", v);
+  };
+  const applyWebSearch = (on: boolean) => {
+    setWebSearch(on);
+    writeSetting("chatWebSearch", on ? "on" : "off");
+  };
+  const applyModel = (v: string) => {
+    setModel(v);
+    writeSetting("chatModel", v);
+  };
+  const clearChat = () => {
+    window.dispatchEvent(new Event("chat:clear"));
+    setCleared(true);
+    setTimeout(() => setCleared(false), 1500);
   };
 
   return (
@@ -54,28 +136,97 @@ export default function SettingsMenu() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-2 w-56 rounded-xl border border-neutral-800 bg-neutral-900 p-3 shadow-2xl">
-          <div className="text-xs font-semibold text-neutral-400 mb-2">
-            Appearance
-          </div>
-          <div className="inline-flex w-full rounded-lg border border-neutral-800 bg-neutral-950 p-0.5">
-            {(["dark", "light"] as Theme[]).map((t) => (
+        <div className="absolute right-0 z-30 mt-2 max-h-[80vh] w-72 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 p-3 shadow-2xl">
+          <Section title="Appearance">
+            <Segmented
+              options={[
+                { value: "dark", label: "Dark" },
+                { value: "light", label: "Light" },
+              ]}
+              value={theme}
+              onChange={(v) => applyTheme(v as Theme)}
+            />
+          </Section>
+
+          <Section
+            title="Indices feed"
+            hint={
+              indices === "cash"
+                ? "Cash index — matches the value on investing.com / Google."
+                : indices === "auto"
+                ? "Cash while US markets are open, futures after the close."
+                : "E-mini futures — moves live 24h, including overnight & weekends."
+            }
+          >
+            <Segmented
+              options={[
+                { value: "futures", label: "Futures" },
+                { value: "cash", label: "Cash" },
+                { value: "auto", label: "Auto" },
+              ]}
+              value={indices}
+              onChange={applyIndices}
+            />
+          </Section>
+
+          <Section
+            title="Refresh rate"
+            hint={
+              refresh === "slow"
+                ? "Slower polling — lighter on data/battery."
+                : refresh === "normal"
+                ? "Balanced live updates."
+                : "Snappiest live ticking."
+            }
+          >
+            <Segmented
+              options={[
+                { value: "live", label: "Live" },
+                { value: "normal", label: "Normal" },
+                { value: "slow", label: "Slow" },
+              ]}
+              value={refresh}
+              onChange={applyRefresh}
+            />
+          </Section>
+
+          <Section title="Assistant">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-neutral-300">Web search</span>
               <button
-                key={t}
-                onClick={() => apply(t)}
-                className={`flex-1 rounded-md px-3 py-1.5 text-sm capitalize transition ${
-                  theme === t
-                    ? "bg-neutral-700 text-white"
-                    : "text-neutral-400 hover:text-neutral-200"
+                role="switch"
+                aria-checked={webSearch}
+                onClick={() => applyWebSearch(!webSearch)}
+                className={`relative h-5 w-9 rounded-full transition ${
+                  webSearch ? "bg-emerald-600" : "bg-neutral-700"
                 }`}
               >
-                {t}
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+                    webSearch ? "left-[18px]" : "left-0.5"
+                  }`}
+                />
               </button>
-            ))}
-          </div>
-          <p className="mt-2.5 text-[11px] text-neutral-600">
-            More settings coming soon.
-          </p>
+            </div>
+            <div className="mt-2.5 mb-1 text-[11px] text-neutral-500">Model</div>
+            <Segmented
+              options={[
+                { value: "fast", label: "Fast" },
+                { value: "deep", label: "Deep" },
+              ]}
+              value={model}
+              onChange={applyModel}
+            />
+            <p className="mt-1.5 text-[11px] leading-snug text-neutral-600">
+              Fast is the everyday model; Deep is stronger but slower.
+            </p>
+            <button
+              onClick={clearChat}
+              className="mt-2.5 w-full rounded-lg border border-neutral-800 px-3 py-1.5 text-xs text-neutral-400 hover:text-neutral-200 hover:border-neutral-700 transition"
+            >
+              {cleared ? "Chat history cleared" : "Clear chat history"}
+            </button>
+          </Section>
         </div>
       )}
     </div>

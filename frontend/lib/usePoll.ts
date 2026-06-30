@@ -51,8 +51,9 @@ export function usePoll<T>(
       active = false;
       clearInterval(id);
     };
+    // Restart when deps change or the interval (refresh-rate setting) changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [...deps, intervalMs]);
 
   return { data, error, loading, updatedAt };
 }
