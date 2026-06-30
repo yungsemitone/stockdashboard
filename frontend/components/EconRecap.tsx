@@ -1,16 +1,22 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { api, type EconomyRecap } from "@/lib/api";
 import { usePoll } from "@/lib/usePoll";
 
 export default function EconRecap() {
-  // Polls periodically; the backend only regenerates the recap when a new
-  // economic number is actually released, so this just picks up fresh text.
+  // The recap rarely changes, so poll slowly — but if a fetch fails (e.g. the
+  // backend is mid-deploy), retry soon instead of leaving the error up for the
+  // full interval, then back off once it loads.
+  const [pollMs, setPollMs] = useState(30 * 60 * 1000);
   const { data, error } = usePoll<EconomyRecap>(
     () => api.economyRecap(),
-    30 * 60 * 1000,
+    pollMs,
     [],
   );
+  useEffect(() => {
+    setPollMs(error ? 20_000 : 30 * 60 * 1000);
+  }, [error]);
   const recap = data?.recap;
 
   return (
