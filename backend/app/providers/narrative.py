@@ -7,6 +7,7 @@ ties the moves to macro themes.
 
 from __future__ import annotations
 
+import hashlib
 import time
 
 from ..config import settings
@@ -101,4 +102,100 @@ def market_narrative(scope: str = "day") -> dict:
         result = {"scope": scope, "narrative": fallback, "ai": False, "error": str(e)}
 
     _cache[scope] = (time.time(), result)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Daily economic recap — a short plain-English read on the latest macro data.
+# Cached by a signature of the readings so it only regenerates when a new
+# number actually comes out.
+# ---------------------------------------------------------------------------
+
+_recap_cache: dict[str, object] = {}
+
+
+def _fmt_reading(value: float, unit: str) -> str:
+    if unit == "K":
+        return f"{value:+,.0f}K"
+    if unit == "%":
+        return f"{value:.2f}%"
+    return f"{value:.1f}"
+
+
+def _recap_signature(inds: list[dict]) -> str:
+    raw = ";".join(
+        f"{i['id']}={i['value']:.4f}@{i['as_of']}"
+        for i in sorted(inds, key=lambda x: x["id"])
+    )
+    return hashlib.sha1(raw.encode()).hexdigest()
+
+
+def _recap_context(inds: list[dict]) -> str:
+    lines = []
+    for ind in sorted(inds, key=lambda i: i["as_of"], reverse=True):
+        prev = ind.get("prev")
+        prev_txt = (
+            f" (prev {_fmt_reading(prev, ind['unit'])})" if prev is not None else ""
+        )
+        lines.append(
+            f"- {ind['label']}: {_fmt_reading(ind['value'], ind['unit'])}{prev_txt}, "
+            f"latest reading dated {ind['as_of']}. Why it matters: {ind['implication']}"
+        )
+    return "\n".join(lines)
+
+
+def _recap_fallback(inds: list[dict]) -> str:
+    recent = sorted(inds, key=lambda i: i["as_of"], reverse=True)[:3]
+    bits = [
+        f"{i['label']} at {_fmt_reading(i['value'], i['unit'])} (as of {i['as_of']})"
+        for i in recent
+    ]
+    return "Latest economic readings — " + "; ".join(bits) + "."
+
+
+def economic_recap() -> dict:
+    """A short daily recap of the latest economic numbers and what they imply."""
+    inds = economy.indicators()
+    if not inds:
+        return {"recap": "No economic data available yet.", "ai": False, "as_of": None}
+
+    as_of = max(i["as_of"] for i in inds)
+    sig = _recap_signature(inds)
+    if _recap_cache.get("sig") == sig and _recap_cache.get("result"):
+        return _recap_cache["result"]  # type: ignore[return-value]
+
+    fallback = _recap_fallback(inds)
+
+    if not settings.anthropic_api_key:
+        result = {"recap": fallback, "ai": False, "as_of": as_of}
+        _recap_cache.update(sig=sig, result=result)
+        return result
+
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        prompt = (
+            "You are an economics commentator writing a brief daily recap for a markets "
+            "dashboard. Here are the latest US economic readings, most recent first:\n\n"
+            f"{_recap_context(inds)}\n\n"
+            "Write a SHORT recap (3-4 sentences) of what the latest numbers say and their "
+            "implications for the Fed, rates, and markets. Lead with the most recently "
+            "released figures and cite the actual numbers. Be specific and grounded in the "
+            "data above — do not invent figures or releases. Plain English, no preamble, "
+            "no disclaimers."
+        )
+        msg = client.messages.create(
+            model=settings.narrative_model,
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(
+            getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text"
+        ).strip()
+        result = {"recap": text or fallback, "ai": bool(text), "as_of": as_of}
+    except Exception as e:  # network, auth, quota — degrade gracefully
+        result = {"recap": fallback, "ai": False, "as_of": as_of, "error": str(e)}
+
+    _recap_cache.update(sig=sig, result=result)
     return result

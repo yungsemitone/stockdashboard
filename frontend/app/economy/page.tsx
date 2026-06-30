@@ -1,6 +1,7 @@
 "use client";
 
 import EconIndicators from "@/components/EconIndicators";
+import EconRecap from "@/components/EconRecap";
 import EconCalendar from "@/components/EconCalendar";
 import NewsList from "@/components/NewsList";
 
@@ -16,8 +17,9 @@ export default function EconomyPage() {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-3">
-        <div className="lg:col-span-2 self-start">
+        <div className="lg:col-span-2 self-start space-y-5">
           <EconIndicators />
+          <EconRecap />
         </div>
         <div className="grid gap-5 self-start">
           <EconCalendar />

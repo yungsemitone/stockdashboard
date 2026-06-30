@@ -95,6 +95,12 @@ def economy_indicators():
     return {"indicators": economy.indicators()}
 
 
+@router.get("/economy/recap")
+def economy_recap():
+    """Short daily recap of the latest economic numbers and their implications."""
+    return narrative.economic_recap()
+
+
 @router.get("/calendar")
 def economic_calendar(days: int = 45):
     return {"events": econ_calendar.upcoming(days)}

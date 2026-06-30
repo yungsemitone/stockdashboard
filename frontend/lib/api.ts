@@ -158,6 +158,13 @@ export type Indicator = {
   implication: string;
 };
 
+export type EconomyRecap = {
+  recap: string;
+  ai: boolean;
+  as_of: string | null;
+  error?: string;
+};
+
 export type CalEvent = {
   date: string;
   name: string;
@@ -212,6 +219,7 @@ export const api = {
   symbolNews: (symbol: string) =>
     get<{ articles: Article[] }>(`/api/news/${sym(symbol)}`),
   economy: () => get<{ indicators: Indicator[] }>("/api/economy"),
+  economyRecap: () => get<EconomyRecap>("/api/economy/recap"),
   calendar: () => get<{ events: CalEvent[] }>("/api/calendar"),
   currencies: () => get<{ currencies: string[] }>("/api/currencies"),
   convert: (base: string, quote: string, amount: number) =>
