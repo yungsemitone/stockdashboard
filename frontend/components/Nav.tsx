@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import SearchBox from "./SearchBox";
+import SettingsMenu from "./SettingsMenu";
 
 const LINKS = [
   { href: "/", label: "Dashboard" },
@@ -39,6 +40,7 @@ export default function Nav() {
         </nav>
         <div className="flex-1" />
         <SearchBox />
+        <SettingsMenu />
       </div>
       <nav className="md:hidden flex items-center gap-1 text-sm px-4 pb-2 overflow-x-auto">
         {LINKS.map((l) => (

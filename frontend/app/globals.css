@@ -17,3 +17,14 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
+
+/* Light theme (Settings → Appearance). Dark is the default and is left exactly
+   as-is; Light inverts the whole UI to white-bg/black-text. hue-rotate keeps
+   greens/reds (gains/losses) looking right instead of swapping to their
+   complements. */
+html.theme-light {
+  background: #ffffff;
+}
+html.theme-light body {
+  filter: invert(1) hue-rotate(180deg);
+}

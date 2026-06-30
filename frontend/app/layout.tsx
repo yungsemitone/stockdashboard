@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import Nav from "@/components/Nav";
 import ChatWidget from "@/components/ChatWidget";
@@ -20,15 +21,21 @@ export const metadata: Metadata = {
     "Live stocks, indices, commodities & bonds with AI macro context.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Read the theme cookie at render time so the right theme is in the initial
+  // HTML — no flash, and no client-side script.
+  const theme = (await cookies()).get("theme")?.value;
+  const themeClass = theme === "light" ? " theme-light" : "";
+
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased${themeClass}`}
     >
       <body className="min-h-full flex flex-col">
         <Nav />
