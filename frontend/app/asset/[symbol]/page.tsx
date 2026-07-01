@@ -14,6 +14,16 @@ import { fmtPrice, fmtPct, fmtCompact, changeColor } from "@/lib/format";
 
 const RANGES = ["1d", "5d", "1mo", "6mo", "1y", "5y", "max"] as const;
 
+const PERIOD_LABEL: Record<string, string> = {
+  "1d": "today",
+  "5d": "past 5 days",
+  "1mo": "past month",
+  "6mo": "past 6 months",
+  "1y": "past year",
+  "5y": "past 5 years",
+  max: "all time",
+};
+
 const CLASS_LABELS: Record<string, string> = {
   stocks: "Stock",
   indices: "Index",
@@ -63,7 +73,22 @@ export default function AssetPage({
     livePrice != null && prevClose != null && prevClose !== 0
       ? ((livePrice - prevClose) / prevClose) * 100
       : quote?.change_pct;
-  const up = (dispPct ?? 0) >= 0;
+  // The change under the price reflects the *selected time period* (the range
+  // the chart is currently showing) — today's move for 1D, otherwise the shift
+  // from the first candle in the range to the current price. Keyed off the
+  // loaded history's range so the number always matches the chart on screen.
+  const chartRange = hist?.range ?? range;
+  const isDay = chartRange === "1d";
+  const firstClose = candles.find((c) => c.close != null)?.close ?? null;
+  const rangeChange =
+    !isDay && firstClose != null && dispPrice != null ? dispPrice - firstClose : null;
+  const rangePct =
+    rangeChange != null && firstClose ? (rangeChange / firstClose) * 100 : null;
+  const hasRange = rangeChange != null && rangePct != null;
+  const shownChange = hasRange ? rangeChange : dispChange;
+  const shownPct = hasRange ? rangePct : dispPct;
+  const periodLabel = hasRange ? PERIOD_LABEL[chartRange] ?? chartRange : "today";
+  const up = (shownPct ?? 0) >= 0;
 
   const stats: [string, string][] = quote
     ? [
@@ -122,11 +147,14 @@ export default function AssetPage({
             className="text-3xl font-bold tabular-nums"
           />
           <div
-            className={`text-lg font-medium tabular-nums ${changeColor(dispPct)}`}
+            className={`text-lg font-medium tabular-nums ${changeColor(shownPct)}`}
           >
-            {dispChange != null &&
-              `${dispChange >= 0 ? "+" : "-"}${fmtPrice(Math.abs(dispChange), priceOpts)} `}
-            {fmtPct(dispPct)}
+            {shownChange != null &&
+              `${shownChange >= 0 ? "+" : "-"}${fmtPrice(Math.abs(shownChange), priceOpts)} `}
+            {fmtPct(shownPct)}
+            <span className="ml-1.5 text-xs font-normal text-neutral-500">
+              {periodLabel}
+            </span>
           </div>
         </div>
       </div>
