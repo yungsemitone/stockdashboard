@@ -174,6 +174,21 @@ export type CalEvent = {
   implication: string;
 };
 
+export type UniverseSymbol = { symbol: string; name: string };
+
+export type UniverseClass = {
+  key: string;
+  label: string;
+  visible: boolean;
+  symbols: UniverseSymbol[];
+};
+
+export type UniverseConfig = {
+  classes: UniverseClass[];
+  is_default: boolean;
+  max_per_class: number;
+};
+
 export type ConvertResult = {
   base: string;
   quote: string;
@@ -220,6 +235,11 @@ export const api = {
     get<{ articles: Article[] }>(`/api/news/${sym(symbol)}`),
   economy: () => get<{ indicators: Indicator[] }>("/api/economy"),
   economyRecap: () => get<EconomyRecap>("/api/economy/recap"),
+  universeConfig: () => get<UniverseConfig>("/api/universe/config"),
+  universeSave: (
+    classes: { key: string; visible: boolean; symbols: UniverseSymbol[] }[],
+  ) => send<UniverseConfig>("PUT", "/api/universe/config", { classes }),
+  universeReset: () => send<UniverseConfig>("POST", "/api/universe/reset"),
   calendar: () => get<{ events: CalEvent[] }>("/api/calendar"),
   currencies: () => get<{ currencies: string[] }>("/api/currencies"),
   convert: (base: string, quote: string, amount: number) =>

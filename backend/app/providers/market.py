@@ -190,7 +190,7 @@ def _quote_from_series(symbol: str, s: pd.Series | None) -> dict:
         "symbol": symbol,
         "name": universe.name_for(symbol),
         "is_level": symbol in universe.LEVEL_SYMBOLS,
-        "is_fx": symbol in universe.FX_SYMBOLS,
+        "is_fx": universe.is_fx(symbol),
     }
     if s is None or len(s) == 0:
         return {**base, "price": None, "change": None, "change_pct": None}
@@ -209,14 +209,16 @@ def realtime_quotes(symbols: list[str]) -> dict[str, dict]:
     return _cached(key, 2, lambda: twelvedata.quotes(symbols))  # type: ignore[return-value]
 
 
-def get_overview() -> dict[str, list[dict]]:
+def get_overview(universe_map: dict[str, list[str]] | None = None) -> dict[str, list[dict]]:
     """Snapshot quote (price + today's change) for every tracked instrument.
 
     Stocks/FX/metals get real-time Twelve Data prices overlaid on the daily-close
     base; indices/commodities/bonds come from the (yfinance) daily series.
+    Pass `universe_map` to snapshot a specific set (e.g. the stock defaults for
+    consumers that must not follow the user's customization).
     """
     out: dict[str, list[dict]] = {}
-    for cls, syms in universe.UNIVERSE.items():
+    for cls, syms in (universe_map or universe.UNIVERSE).items():
         closes = _batch_closes(syms, "5d", "1d")
         rtq = realtime_quotes(syms)
         items = []
@@ -275,7 +277,7 @@ def get_summary(scope: str = "day", asset_class: str | None = None) -> dict[str,
                     "price": last,
                     "change_pct": pct,
                     "is_level": s in universe.LEVEL_SYMBOLS,
-                    "is_fx": s in universe.FX_SYMBOLS,
+                    "is_fx": universe.is_fx(s),
                 }
             )
         movers.sort(key=lambda m: m["change_pct"], reverse=True)

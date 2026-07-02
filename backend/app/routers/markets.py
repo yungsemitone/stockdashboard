@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from .. import universe
 from ..providers import analyst
@@ -25,11 +26,48 @@ def get_universe():
     }
 
 
+class UniverseSymbolIn(BaseModel):
+    symbol: str
+    name: str | None = None
+
+
+class UniverseClassIn(BaseModel):
+    key: str
+    visible: bool = True
+    symbols: list[UniverseSymbolIn] = []
+
+
+class UniverseConfigIn(BaseModel):
+    classes: list[UniverseClassIn]
+
+
+@router.get("/universe/config")
+def universe_config():
+    """The dashboard's full instrument setup (for the Customize editor)."""
+    return universe.get_config()
+
+
+@router.put("/universe/config")
+def universe_config_save(cfg: UniverseConfigIn):
+    """Save a customization: per-class symbols and visibility."""
+    return universe.apply_config([c.model_dump() for c in cfg.classes])
+
+
+@router.post("/universe/reset")
+def universe_config_reset():
+    """Restore the default instruments and show all classes."""
+    return universe.reset_config()
+
+
 @router.get("/overview")
-def overview(indices: str = "futures"):
-    """Snapshot of every instrument (price + today's change), by class."""
+def overview(indices: str = "futures", default: int = 0):
+    """Snapshot of every instrument (price + today's change), by class.
+
+    `default=1` serves the stock defaults regardless of customization — used by
+    The Morning Desk so its tape never changes with this dashboard's setup.
+    """
     universe.set_indices_mode(indices)
-    return market.get_overview()
+    return market.get_overview(universe.DEFAULT_UNIVERSE if default else None)
 
 
 @router.get("/quotes")

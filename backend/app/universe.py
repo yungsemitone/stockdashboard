@@ -5,10 +5,12 @@ Symbols are Yahoo Finance tickers:
   - "=F" suffix -> a futures contract (e.g. GC=F = gold, CL=F = WTI crude)
   - plain        -> an equity or ETF (e.g. AAPL, TLT)
 
-This is just the starting watchlist. It will become user-editable later.
+The defaults below are the starting set; the user can customize per-class
+symbols and hide whole classes (persisted via the customization block at the
+bottom of this file). `UNIVERSE` is the *live* universe every feature reads.
 """
 
-UNIVERSE: dict[str, list[str]] = {
+DEFAULT_UNIVERSE: dict[str, list[str]] = {
     "stocks": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM"],
     "indices": ["^GSPC", "^DJI", "^NDX", "^RUT", "^VIX", "^FTSE", "^N225", "^GDAXI"],
     "commodities": ["GC=F", "SI=F", "CL=F", "BZ=F", "NG=F", "HG=F", "ZC=F", "ZW=F"],
@@ -24,6 +26,11 @@ UNIVERSE: dict[str, list[str]] = {
         "USDCNY=X",
     ],
 }
+
+# The live universe: defaults overlaid with the user's saved customization
+# (rebuilt in place so overview/summary/movers/narrative/chat all follow).
+# Hidden classes are absent entirely.
+UNIVERSE: dict[str, list[str]] = {k: list(v) for k, v in DEFAULT_UNIVERSE.items()}
 
 # Human-friendly names for display.
 NAMES: dict[str, str] = {
@@ -158,11 +165,183 @@ def feed_symbol(symbol: str) -> str:
 
 
 def name_for(symbol: str) -> str:
-    return NAMES.get(symbol, symbol)
+    return _custom_names.get(symbol) or NAMES.get(symbol, symbol)
+
+
+def is_fx(symbol: str) -> bool:
+    """FX pairs get extra decimal places; covers custom-added Yahoo pairs too."""
+    return symbol in FX_SYMBOLS or symbol.endswith("=X")
 
 
 def class_for(symbol: str) -> str | None:
-    for cls, syms in UNIVERSE.items():
+    # Checked against the full config (not just UNIVERSE) so instruments in a
+    # hidden class still classify correctly on their asset pages.
+    for cls, syms in _class_symbols.items():
         if symbol in syms:
             return cls
     return None
+
+
+# ---------------------------------------------------------------------------
+# User customization (Customize dashboard) — persisted like the watchlists.
+# ---------------------------------------------------------------------------
+
+import json
+import threading
+from pathlib import Path
+
+from .config import settings
+
+_CFG_BASE = (
+    Path(settings.data_dir)
+    if settings.data_dir
+    else Path(__file__).resolve().parent.parent / "data"
+)
+_CFG_PATH = _CFG_BASE / "universe.json"
+_cfg_lock = threading.Lock()
+
+MAX_SYMBOLS_PER_CLASS = 20
+
+# Full per-class setup, *including* hidden classes (hiding is reversible).
+_class_symbols: dict[str, list[str]] = {k: list(v) for k, v in DEFAULT_UNIVERSE.items()}
+_hidden_classes: set[str] = set()
+_custom_names: dict[str, str] = {}  # display names for user-added symbols
+
+
+def _rebuild_universe() -> None:
+    UNIVERSE.clear()
+    UNIVERSE.update(
+        {
+            cls: list(syms)
+            for cls, syms in _class_symbols.items()
+            if cls not in _hidden_classes
+        }
+    )
+
+
+def is_default_config() -> bool:
+    return not _hidden_classes and _class_symbols == DEFAULT_UNIVERSE
+
+
+def get_config() -> dict:
+    """The full instrument setup, shaped for the Customize editor."""
+    return {
+        "classes": [
+            {
+                "key": cls,
+                "label": ASSET_CLASS_LABELS.get(cls, cls.title()),
+                "visible": cls not in _hidden_classes,
+                "symbols": [
+                    {"symbol": s, "name": name_for(s)} for s in _class_symbols[cls]
+                ],
+            }
+            for cls in DEFAULT_UNIVERSE
+        ],
+        "is_default": is_default_config(),
+        "max_per_class": MAX_SYMBOLS_PER_CLASS,
+    }
+
+
+def apply_config(classes: list[dict]) -> dict:
+    """Sanitize + apply a customization, persist it, and return the new config.
+
+    Unknown classes are ignored; classes missing from the payload keep their
+    current setup. Per class: dedupe, drop blanks, cap the count.
+    """
+    with _cfg_lock:
+        for cls_cfg in classes:
+            key = cls_cfg.get("key")
+            if key not in DEFAULT_UNIVERSE:
+                continue
+            seen: set[str] = set()
+            symbols: list[str] = []
+            for item in cls_cfg.get("symbols", []):
+                sym = str(item.get("symbol", "")).strip()
+                if not sym or sym in seen or len(sym) > 20:
+                    continue
+                seen.add(sym)
+                symbols.append(sym)
+                name = str(item.get("name") or "").strip()
+                if name and sym not in NAMES:
+                    _custom_names[sym] = name
+                if len(symbols) >= MAX_SYMBOLS_PER_CLASS:
+                    break
+            _class_symbols[key] = symbols
+            if cls_cfg.get("visible", True):
+                _hidden_classes.discard(key)
+            else:
+                _hidden_classes.add(key)
+        # Drop custom names that no longer point at a tracked symbol.
+        in_use = {s for syms in _class_symbols.values() for s in syms}
+        for sym in list(_custom_names):
+            if sym not in in_use:
+                del _custom_names[sym]
+        _rebuild_universe()
+        _save_cfg()
+    return get_config()
+
+
+def reset_config() -> dict:
+    with _cfg_lock:
+        _class_symbols.clear()
+        _class_symbols.update({k: list(v) for k, v in DEFAULT_UNIVERSE.items()})
+        _hidden_classes.clear()
+        _custom_names.clear()
+        _rebuild_universe()
+        try:
+            _CFG_PATH.unlink(missing_ok=True)
+        except Exception:
+            pass
+    return get_config()
+
+
+def _save_cfg() -> None:
+    try:
+        _CFG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _CFG_PATH.write_text(
+            json.dumps(
+                {
+                    "classes": {
+                        cls: {
+                            "visible": cls not in _hidden_classes,
+                            "symbols": syms,
+                        }
+                        for cls, syms in _class_symbols.items()
+                    },
+                    "names": _custom_names,
+                },
+                indent=2,
+            )
+        )
+    except Exception:
+        pass  # persistence is best-effort; the in-memory config still applies
+
+
+def _load_cfg() -> None:
+    try:
+        data = json.loads(_CFG_PATH.read_text())
+    except Exception:
+        return
+    classes = data.get("classes")
+    if not isinstance(classes, dict):
+        return
+    for cls, cfg in classes.items():
+        if cls not in DEFAULT_UNIVERSE or not isinstance(cfg, dict):
+            continue
+        syms = [
+            s.strip()
+            for s in cfg.get("symbols", [])
+            if isinstance(s, str) and s.strip()
+        ]
+        _class_symbols[cls] = syms[:MAX_SYMBOLS_PER_CLASS]
+        if cfg.get("visible", True):
+            _hidden_classes.discard(cls)
+        else:
+            _hidden_classes.add(cls)
+    names = data.get("names")
+    if isinstance(names, dict):
+        _custom_names.update({str(k): str(v) for k, v in names.items()})
+    _rebuild_universe()
+
+
+_load_cfg()

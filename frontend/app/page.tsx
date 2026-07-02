@@ -5,6 +5,8 @@ import { api, CLASS_ORDER, CLASS_LABELS, type Overview, type Summary } from "@/l
 import { usePoll } from "@/lib/usePoll";
 import { usePriceStream } from "@/lib/usePriceStream";
 import { useRefresh, useSetting } from "@/lib/settings";
+import { useUniverseVersion } from "@/lib/universe";
+import CustomizeDashboard from "@/components/CustomizeDashboard";
 import ScopeTabs, { type Scope } from "@/components/ScopeTabs";
 import MacroPanel from "@/components/MacroPanel";
 import MoversNews from "@/components/MoversNews";
@@ -15,18 +17,20 @@ import EconCalendar from "@/components/EconCalendar";
 export default function Home() {
   const [scope, setScope] = useState<Scope>("day");
   const refresh = useRefresh();
-  // Re-fetch immediately when the indices feed (futures/cash/auto) is changed.
+  // Re-fetch immediately when the indices feed (futures/cash/auto) is changed
+  // or the dashboard's instruments are customized.
   const indicesMode = useSetting("indicesMode", "futures");
+  const universeVersion = useUniverseVersion();
 
   const { data: overview, error: ovErr, updatedAt } = usePoll<Overview>(
     () => api.overview(),
     refresh.overview,
-    [indicesMode],
+    [indicesMode, universeVersion],
   );
   const { data: summary } = usePoll<Summary>(
     () => api.summary(scope),
     60_000,
-    [scope, indicesMode],
+    [scope, indicesMode, universeVersion],
   );
 
   // Ticking clock so the "updated Xs ago" freshness indicator counts up live.
@@ -71,7 +75,10 @@ export default function Home() {
             )}
           </div>
         </div>
-        <ScopeTabs scope={scope} onChange={setScope} />
+        <div className="flex items-center gap-2">
+          <CustomizeDashboard />
+          <ScopeTabs scope={scope} onChange={setScope} />
+        </div>
       </div>
 
       <div className="mb-6">
@@ -91,7 +98,8 @@ export default function Home() {
 
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2 grid gap-5 sm:grid-cols-2 self-start">
-          {CLASS_ORDER.map((cls) => (
+          {/* Hidden classes are absent from the overview once it loads. */}
+          {CLASS_ORDER.filter((cls) => !overview || overview[cls]).map((cls) => (
             <ClassSection
               key={cls}
               label={CLASS_LABELS[cls]}
@@ -100,6 +108,13 @@ export default function Home() {
               live={live}
             />
           ))}
+          {overview && Object.keys(overview).length === 0 && (
+            <div className="sm:col-span-2 rounded-xl border border-neutral-800 bg-neutral-900/60 px-5 py-8 text-center text-sm text-neutral-500">
+              Every section is hidden. Use{" "}
+              <span className="text-neutral-300">Customize</span> to bring them
+              back.
+            </div>
+          )}
         </div>
 
         <div className="grid gap-5 self-start">

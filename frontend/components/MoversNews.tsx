@@ -3,11 +3,16 @@
 import Link from "next/link";
 import { api, type MoversPayload } from "@/lib/api";
 import { usePoll } from "@/lib/usePoll";
+import { useUniverseVersion } from "@/lib/universe";
 import { fmtPct, changeColor } from "@/lib/format";
 import type { Scope } from "./ScopeTabs";
 
 export default function MoversNews({ scope }: { scope: Scope }) {
-  const { data } = usePoll<MoversPayload>(() => api.movers(scope), 60_000, [scope]);
+  const universeVersion = useUniverseVersion();
+  const { data } = usePoll<MoversPayload>(() => api.movers(scope), 60_000, [
+    scope,
+    universeVersion,
+  ]);
   const movers = data?.movers ?? [];
 
   return (
