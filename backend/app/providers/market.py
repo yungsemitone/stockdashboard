@@ -209,6 +209,26 @@ def realtime_quotes(symbols: list[str]) -> dict[str, dict]:
     return _cached(key, 2, lambda: twelvedata.quotes(symbols))  # type: ignore[return-value]
 
 
+def snapshot_quotes(symbols: list[str]) -> dict[str, dict]:
+    """Overview-style snapshot (daily change + real-time overlay) for an
+    arbitrary symbol list — used by the alerts engine."""
+    if not symbols:
+        return {}
+    closes = _batch_closes(symbols, "5d", "1d")
+    rtq = realtime_quotes(symbols)
+    out: dict[str, dict] = {}
+    for s in symbols:
+        q = _quote_from_series(s, closes.get(s))
+        r = rtq.get(s)
+        if r and r.get("price") is not None:
+            q["price"] = r["price"]
+            if r.get("change_pct") is not None:
+                q["change"] = r.get("change")
+                q["change_pct"] = r["change_pct"]
+        out[s] = q
+    return out
+
+
 def get_overview(universe_map: dict[str, list[str]] | None = None) -> dict[str, list[dict]]:
     """Snapshot quote (price + today's change) for every tracked instrument.
 

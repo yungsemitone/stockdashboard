@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import SearchBox from "./SearchBox";
+import AlertsBell from "./AlertsBell";
 import SettingsMenu from "./SettingsMenu";
 
 const LINKS = [
@@ -40,6 +41,7 @@ export default function Nav() {
         </nav>
         <div className="flex-1" />
         <SearchBox />
+        <AlertsBell />
         <SettingsMenu />
       </div>
       <nav className="md:hidden flex items-center gap-1 text-sm px-4 pb-2 overflow-x-auto">

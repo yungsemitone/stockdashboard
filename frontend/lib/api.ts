@@ -189,6 +189,49 @@ export type UniverseConfig = {
   max_per_class: number;
 };
 
+export type AlertRule = {
+  id: string;
+  symbol: string;
+  name: string;
+  kind: "move" | "above" | "below";
+  threshold: number;
+  direction: "any" | "up" | "down";
+  enabled: boolean;
+  active: boolean;
+  last_fired: number;
+  created: number;
+};
+
+export type AlertEvent = {
+  id: string;
+  rule_id: string;
+  symbol: string;
+  name: string;
+  kind: string;
+  threshold: number;
+  value: number | null;
+  price: number | null;
+  message: string;
+  ts: number;
+};
+
+export type AlertSettings = {
+  email_enabled: boolean;
+  email_to: string;
+  sms_enabled: boolean;
+  sms_number: string;
+  sms_carrier: string;
+  cooldown_min: number;
+};
+
+export type AlertsState = {
+  rules: AlertRule[];
+  settings: AlertSettings;
+  events: AlertEvent[];
+  email_configured: boolean;
+  sms_carriers: string[];
+};
+
 export type ConvertResult = {
   base: string;
   quote: string;
@@ -235,6 +278,25 @@ export const api = {
     get<{ articles: Article[] }>(`/api/news/${sym(symbol)}`),
   economy: () => get<{ indicators: Indicator[] }>("/api/economy"),
   economyRecap: () => get<EconomyRecap>("/api/economy/recap"),
+  alerts: () => get<AlertsState>("/api/alerts"),
+  alertCreate: (rule: {
+    symbol: string;
+    name?: string;
+    kind: string;
+    threshold: number;
+    direction?: string;
+  }) => send<AlertsState>("POST", "/api/alerts", rule),
+  alertUpdate: (
+    id: string,
+    patch: { enabled?: boolean; threshold?: number; direction?: string },
+  ) => send<AlertsState>("PUT", `/api/alerts/${id}`, patch),
+  alertDelete: (id: string) => send<AlertsState>("DELETE", `/api/alerts/${id}`),
+  alertSettings: (patch: Partial<AlertSettings>) =>
+    send<AlertsState>("PUT", "/api/alerts/settings", patch),
+  alertTest: (channel: "email" | "sms") =>
+    send<{ ok: boolean; error?: string }>("POST", "/api/alerts/test", { channel }),
+  alertEvents: (since: number) =>
+    get<{ events: AlertEvent[]; now: number }>(`/api/alerts/events?since=${since}`),
   universeConfig: () => get<UniverseConfig>("/api/universe/config"),
   universeSave: (
     classes: { key: string; visible: boolean; symbols: UniverseSymbol[] }[],

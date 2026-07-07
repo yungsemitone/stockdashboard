@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     # Where persistent files (watchlists) live. Point this at a mounted disk in
     # production; defaults to backend/data/ for local dev.
     data_dir: str | None = None
+    # SMTP for alert emails/texts (e.g. Gmail: smtp.gmail.com + an app password).
+    # Texts ride the same pipe via the carriers' email→SMS gateways.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_pass: str | None = None
+    alerts_from: str | None = None  # defaults to smtp_user
 
     @property
     def cors_origin_list(self) -> list[str]:

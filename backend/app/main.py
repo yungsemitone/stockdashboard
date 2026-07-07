@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import scheduler, streaming
 from .config import settings
-from .routers import chat, markets, watchlist
+from .routers import alerts, chat, markets, watchlist
 
 logging.basicConfig(level=logging.INFO)
 
@@ -34,6 +34,7 @@ app.add_middleware(
 app.include_router(markets.router, prefix="/api")
 app.include_router(watchlist.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
+app.include_router(alerts.router, prefix="/api")
 
 
 @app.websocket("/ws/prices")
