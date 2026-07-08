@@ -399,6 +399,26 @@ def _sms_address(number: str, carrier: str) -> str | None:
     return f"{digits}@{gateway}" if gateway and len(digits) == 10 else None
 
 
+def _sms_text(events: list[dict]) -> str:
+    """Carrier gateways silently drop messages with unicode (▲ ± — emoji…),
+    so texts get their own compact, pure-ASCII wording."""
+    lines = []
+    for e in events:
+        val = e.get("value")
+        price = e.get("price")
+        px = f"${price:,.2f}" if isinstance(price, (int, float)) else "n/a"
+        if e["kind"] == "move" and isinstance(val, (int, float)):
+            word = "up" if val >= 0 else "down"
+            lines.append(
+                f"{e['symbol']} {word} {abs(val):.2f}% today at {px} (your {e['threshold']:g}% alert)"
+            )
+        else:
+            word = "above" if e["kind"] == "above" else "below"
+            lines.append(f"{e['symbol']} at {px} - {word} your {e['threshold']:g} target")
+    text = "; ".join(lines)[:150]
+    return text.encode("ascii", "ignore").decode()  # belt & suspenders
+
+
 def _notify(events: list[dict], cfg: dict) -> None:
     if not smtp_configured():
         return
@@ -407,9 +427,9 @@ def _notify(events: list[dict], cfg: dict) -> None:
         if len(events) == 1
         else f"{len(events)} price alerts"
     )
-    body = "\n\n".join(e["message"] for e in events)
     if cfg.get("email_enabled") and cfg.get("email_to"):
         try:
+            body = "\n\n".join(e["message"] for e in events)
             _send_email(
                 [cfg["email_to"]], f"📈 {subject}", body + "\n\n— your Markets dashboard"
             )
@@ -419,8 +439,7 @@ def _notify(events: list[dict], cfg: dict) -> None:
         addr = _sms_address(cfg.get("sms_number", ""), cfg.get("sms_carrier", ""))
         if addr:
             try:
-                # Gateways truncate around 160 chars — keep texts terse.
-                _send_email([addr], subject, body[:150])
+                _send_email([addr], subject, _sms_text(events))
             except Exception as e:
                 log.warning("alert text failed: %s", e)
 
