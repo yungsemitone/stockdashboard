@@ -63,6 +63,7 @@ export default function AlertsBell() {
   const [profile, setProfile] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<string[]>([]);
   const [newName, setNewName] = useState("");
+  const [armDelete, setArmDelete] = useState<string | null>(null);
   const [state, setState] = useState<AlertsState | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [toasts, setToasts] = useState<AlertEvent[]>([]);
@@ -107,7 +108,20 @@ export default function AlertsBell() {
     setProfile(null);
     setState(null);
     setUnread(false);
+    setArmDelete(null);
     api.alertProfiles().then((r) => setProfiles(r.profiles)).catch(() => {});
+  };
+
+  const removeProfile = async (name: string) => {
+    try {
+      const r = await api.alertProfileDelete(name);
+      setProfiles(r.profiles);
+      setArmDelete(null);
+      if (localStorage.getItem(PROFILE_KEY) === name)
+        localStorage.removeItem(PROFILE_KEY);
+    } catch {
+      setErr("Couldn't delete that profile.");
+    }
   };
 
   // Poll for trigger events (works on every page; the bell lives in the nav).
@@ -299,15 +313,42 @@ export default function AlertsBell() {
               </div>
               {profiles.length > 0 && (
                 <div className="mb-3 flex flex-wrap gap-1.5">
-                  {profiles.map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => choose(p)}
-                      className="rounded-full border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-800"
-                    >
-                      {p}
-                    </button>
-                  ))}
+                  {profiles.map((p) =>
+                    armDelete === p ? (
+                      <button
+                        key={p}
+                        onClick={() => removeProfile(p)}
+                        className="rounded-full border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-sm text-rose-300 transition hover:bg-rose-500/20"
+                      >
+                        Delete {p}?
+                      </button>
+                    ) : (
+                      <span
+                        key={p}
+                        className="inline-flex items-center overflow-hidden rounded-full border border-neutral-700"
+                      >
+                        <button
+                          onClick={() => choose(p)}
+                          className="px-3 py-1.5 text-sm text-neutral-200 transition hover:bg-neutral-800"
+                        >
+                          {p}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setArmDelete(p);
+                            setTimeout(
+                              () => setArmDelete((a) => (a === p ? null : a)),
+                              3000,
+                            );
+                          }}
+                          aria-label={`Delete ${p}`}
+                          className="border-l border-neutral-800 px-2 py-1.5 text-neutral-500 transition hover:text-rose-400"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ),
+                  )}
                 </div>
               )}
               <div className="flex items-center gap-2">

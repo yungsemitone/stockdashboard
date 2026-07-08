@@ -138,6 +138,15 @@ def create_profile(name: str) -> list[str]:
         return sorted(data["profiles"])
 
 
+def delete_profile(name: str) -> list[str]:
+    """Remove a profile and everything in it (rules, settings, history)."""
+    with _lock:
+        data = _read()
+        data["profiles"].pop(name, None)
+        _write(data)
+        return sorted(data["profiles"])
+
+
 def get_state(profile: str) -> dict:
     with _lock:
         p = _read()["profiles"].get(profile) or _fresh_profile()

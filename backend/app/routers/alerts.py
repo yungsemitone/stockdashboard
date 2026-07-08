@@ -88,6 +88,12 @@ def create_alert_profile(body: ProfileIn):
         raise HTTPException(400, str(e))
 
 
+@router.delete("/alerts/profiles/{name}")
+def delete_alert_profile(name: str):
+    """Remove a profile entirely (its rules, settings, and history)."""
+    return {"profiles": alerts.delete_profile(_check_name(name))}
+
+
 @router.get("/alerts/events")
 def alert_events(since: float = 0, profile: str = Profile):
     """Trigger events newer than `since` (epoch seconds) — polled by the bell."""

@@ -319,6 +319,11 @@ export const api = {
   alertProfiles: () => get<{ profiles: string[] }>("/api/alerts/profiles"),
   alertProfileCreate: (name: string) =>
     send<{ profiles: string[] }>("POST", "/api/alerts/profiles", { name }),
+  alertProfileDelete: (name: string) =>
+    send<{ profiles: string[] }>(
+      "DELETE",
+      `/api/alerts/profiles/${encodeURIComponent(name)}`,
+    ),
   alerts: (profile: string) =>
     get<AlertsState>(`/api/alerts?profile=${encodeURIComponent(profile)}`),
   alertCreate: (
