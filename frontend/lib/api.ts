@@ -225,6 +225,7 @@ export type AlertSettings = {
 };
 
 export type AlertsState = {
+  profile: string;
   rules: AlertRule[];
   settings: AlertSettings;
   events: AlertEvent[];
@@ -278,25 +279,47 @@ export const api = {
     get<{ articles: Article[] }>(`/api/news/${sym(symbol)}`),
   economy: () => get<{ indicators: Indicator[] }>("/api/economy"),
   economyRecap: () => get<EconomyRecap>("/api/economy/recap"),
-  alerts: () => get<AlertsState>("/api/alerts"),
-  alertCreate: (rule: {
-    symbol: string;
-    name?: string;
-    kind: string;
-    threshold: number;
-    direction?: string;
-  }) => send<AlertsState>("POST", "/api/alerts", rule),
+  alertProfiles: () => get<{ profiles: string[] }>("/api/alerts/profiles"),
+  alerts: (profile: string) =>
+    get<AlertsState>(`/api/alerts?profile=${encodeURIComponent(profile)}`),
+  alertCreate: (
+    profile: string,
+    rule: {
+      symbol: string;
+      name?: string;
+      kind: string;
+      threshold: number;
+      direction?: string;
+    },
+  ) => send<AlertsState>("POST", `/api/alerts?profile=${encodeURIComponent(profile)}`, rule),
   alertUpdate: (
+    profile: string,
     id: string,
     patch: { enabled?: boolean; threshold?: number; direction?: string },
-  ) => send<AlertsState>("PUT", `/api/alerts/${id}`, patch),
-  alertDelete: (id: string) => send<AlertsState>("DELETE", `/api/alerts/${id}`),
-  alertSettings: (patch: Partial<AlertSettings>) =>
-    send<AlertsState>("PUT", "/api/alerts/settings", patch),
-  alertTest: (channel: "email" | "sms") =>
-    send<{ ok: boolean; error?: string }>("POST", "/api/alerts/test", { channel }),
-  alertEvents: (since: number) =>
-    get<{ events: AlertEvent[]; now: number }>(`/api/alerts/events?since=${since}`),
+  ) =>
+    send<AlertsState>(
+      "PUT",
+      `/api/alerts/${id}?profile=${encodeURIComponent(profile)}`,
+      patch,
+    ),
+  alertDelete: (profile: string, id: string) =>
+    send<AlertsState>("DELETE", `/api/alerts/${id}?profile=${encodeURIComponent(profile)}`),
+  alertSettings: (profile: string, patch: Partial<AlertSettings>) =>
+    send<AlertsState>(
+      "PUT",
+      `/api/alerts/settings?profile=${encodeURIComponent(profile)}`,
+      patch,
+    ),
+  alertTest: (profile: string, channel: "email" | "sms") =>
+    send<{ ok: boolean; error?: string }>(
+      "POST",
+      `/api/alerts/test?profile=${encodeURIComponent(profile)}`,
+      { channel },
+    ),
+  alertEvents: (profile: string, since: number) =>
+    get<{ events: AlertEvent[]; now: number }>(
+      `/api/alerts/events?since=${since}&profile=${encodeURIComponent(profile)}`,
+    ),
   universeConfig: () => get<UniverseConfig>("/api/universe/config"),
   universeSave: (
     classes: { key: string; visible: boolean; symbols: UniverseSymbol[] }[],

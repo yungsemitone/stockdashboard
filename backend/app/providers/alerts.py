@@ -1,17 +1,20 @@
-"""Price alerts: user-defined rules evaluated server-side on a schedule.
+"""Price alerts: per-person rules evaluated server-side on a schedule.
 
-Rules live in DATA_DIR/alerts.json (same pattern as the watchlists). The
-scheduler calls check_all() every minute; a rule fires when its condition
-*becomes* true (edge-triggered, so a stock sitting at +4% doesn't re-fire every
-minute, with a per-rule cooldown against boundary flapping). Fires are recorded
-as events for the frontend bell, and — when SMTP is configured — sent as email
-and/or a text via the carrier's email→SMS gateway.
+Alerts are grouped into named *profiles* (Netflix-style — no passwords, it's a
+family app): each person has their own rules, delivery settings, and event
+history in DATA_DIR/alerts.json. The scheduler calls check_all() every minute;
+a rule fires when its condition *becomes* true (edge-triggered, so a stock
+sitting at +4% doesn't re-fire every minute, with a per-rule cooldown against
+boundary flapping). Fires are recorded as events for that person's bell, and —
+when SMTP is configured — sent to *their* email and/or phone (texts ride the
+carrier's email→SMS gateway).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 import uuid
@@ -55,23 +58,49 @@ DEFAULT_SETTINGS = {
 
 MAX_RULES = 50
 MAX_EVENTS = 100
+MAX_PROFILES = 8
+
+# Profile names are shown in the UI and used as storage keys — keep them tame.
+_NAME_RE = re.compile(r"^[A-Za-z0-9 _-]{1,24}$")
+
+
+def valid_name(name: str) -> bool:
+    return bool(_NAME_RE.match(name or ""))
 
 
 # --- storage ----------------------------------------------------------------
 
 
+def _fresh_profile() -> dict:
+    return {"rules": [], "settings": dict(DEFAULT_SETTINGS), "events": []}
+
+
+def _clean_profile(p: dict) -> dict:
+    return {
+        "rules": p.get("rules") or [],
+        "settings": {**DEFAULT_SETTINGS, **(p.get("settings") or {})},
+        "events": p.get("events") or [],
+    }
+
+
 def _read() -> dict:
+    """Load {"profiles": {name: {rules, settings, events}}}, migrating the
+    original single-user format to a profile for the app's owner."""
     try:
         data = json.loads(_PATH.read_text())
-        if isinstance(data, dict):
-            return {
-                "rules": data.get("rules") or [],
-                "settings": {**DEFAULT_SETTINGS, **(data.get("settings") or {})},
-                "events": data.get("events") or [],
-            }
     except Exception:
-        pass
-    return {"rules": [], "settings": dict(DEFAULT_SETTINGS), "events": []}
+        return {"profiles": {}}
+    if isinstance(data, dict) and isinstance(data.get("profiles"), dict):
+        return {
+            "profiles": {
+                str(name): _clean_profile(p)
+                for name, p in data["profiles"].items()
+                if isinstance(p, dict)
+            }
+        }
+    if isinstance(data, dict) and "rules" in data:  # pre-profile layout
+        return {"profiles": {"Aden": _clean_profile(data)}}
+    return {"profiles": {}}
 
 
 def _write(data: dict) -> None:
@@ -82,23 +111,43 @@ def _write(data: dict) -> None:
         log.warning("couldn't persist alerts.json", exc_info=True)
 
 
+def _get_or_create(data: dict, profile: str) -> dict:
+    profs = data["profiles"]
+    if profile not in profs:
+        if len(profs) >= MAX_PROFILES:
+            raise ValueError(f"Profile limit reached ({MAX_PROFILES})")
+        profs[profile] = _fresh_profile()
+    return profs[profile]
+
+
 # --- public state / CRUD -----------------------------------------------------
 
 
-def get_state() -> dict:
+def list_profiles() -> list[str]:
     with _lock:
-        data = _read()
+        return sorted(_read()["profiles"])
+
+
+def get_state(profile: str) -> dict:
+    with _lock:
+        p = _read()["profiles"].get(profile) or _fresh_profile()
     return {
-        "rules": data["rules"],
-        "settings": data["settings"],
-        "events": list(reversed(data["events"][-25:])),  # newest first
+        "profile": profile,
+        "rules": p["rules"],
+        "settings": p["settings"],
+        "events": list(reversed(p["events"][-25:])),  # newest first
         "email_configured": smtp_configured(),
         "sms_carriers": list(SMS_GATEWAYS),
     }
 
 
 def create_rule(
-    symbol: str, name: str | None, kind: str, threshold: float, direction: str
+    profile: str,
+    symbol: str,
+    name: str | None,
+    kind: str,
+    threshold: float,
+    direction: str,
 ) -> dict:
     kind = kind if kind in KINDS else "move"
     rule = {
@@ -115,14 +164,16 @@ def create_rule(
     }
     with _lock:
         data = _read()
-        if len(data["rules"]) >= MAX_RULES:
+        p = _get_or_create(data, profile)
+        if len(p["rules"]) >= MAX_RULES:
             raise ValueError(f"Alert limit reached ({MAX_RULES})")
-        data["rules"].append(rule)
+        p["rules"].append(rule)
         _write(data)
-    return get_state()
+    return get_state(profile)
 
 
 def update_rule(
+    profile: str,
     rule_id: str,
     enabled: bool | None = None,
     threshold: float | None = None,
@@ -130,7 +181,8 @@ def update_rule(
 ) -> dict | None:
     with _lock:
         data = _read()
-        rule = next((r for r in data["rules"] if r["id"] == rule_id), None)
+        p = data["profiles"].get(profile)
+        rule = next((r for r in (p or {}).get("rules", []) if r["id"] == rule_id), None)
         if rule is None:
             return None
         if enabled is not None:
@@ -142,21 +194,23 @@ def update_rule(
         if direction in DIRECTIONS and rule["kind"] == "move":
             rule["direction"] = direction
         _write(data)
-    return get_state()
+    return get_state(profile)
 
 
-def delete_rule(rule_id: str) -> dict:
+def delete_rule(profile: str, rule_id: str) -> dict:
     with _lock:
         data = _read()
-        data["rules"] = [r for r in data["rules"] if r["id"] != rule_id]
-        _write(data)
-    return get_state()
+        p = data["profiles"].get(profile)
+        if p:
+            p["rules"] = [r for r in p["rules"] if r["id"] != rule_id]
+            _write(data)
+    return get_state(profile)
 
 
-def update_settings(patch: dict) -> dict:
+def update_settings(profile: str, patch: dict) -> dict:
     with _lock:
         data = _read()
-        cfg = data["settings"]
+        cfg = _get_or_create(data, profile)["settings"]
         for key in ("email_enabled", "sms_enabled"):
             if key in patch:
                 cfg[key] = bool(patch[key])
@@ -172,13 +226,15 @@ def update_settings(patch: dict) -> dict:
             except (TypeError, ValueError):
                 pass
         _write(data)
-    return get_state()
+    return get_state(profile)
 
 
-def events_since(ts: float) -> list[dict]:
+def events_since(profile: str, ts: float) -> list[dict]:
     with _lock:
-        data = _read()
-    return [e for e in data["events"] if e["ts"] > ts][-20:]
+        p = _read()["profiles"].get(profile)
+    if not p:
+        return []
+    return [e for e in p["events"] if e["ts"] > ts][-20:]
 
 
 # --- evaluation ---------------------------------------------------------------
@@ -229,54 +285,64 @@ def _message(rule: dict, quote: dict) -> str:
 
 
 def check_all() -> int:
-    """Evaluate every enabled rule; record + send fires. Returns the count."""
+    """Evaluate every profile's enabled rules; record + send fires per person.
+    One shared quote snapshot covers everyone. Returns the total fired."""
     with _lock:
         snapshot = _read()
-    enabled = [r for r in snapshot["rules"] if r.get("enabled")]
-    if not enabled:
+    symbols = sorted(
+        {
+            r["symbol"]
+            for p in snapshot["profiles"].values()
+            for r in p["rules"]
+            if r.get("enabled")
+        }
+    )
+    if not symbols:
         return 0
 
-    symbols = sorted({r["symbol"] for r in enabled})
     quotes = market.snapshot_quotes(symbols)  # network — outside the lock
 
     now = time.time()
-    fired: list[dict] = []
+    batches: list[tuple[list[dict], dict]] = []  # (fired events, that profile's settings)
     changed = False
     with _lock:
         data = _read()  # re-read so concurrent edits aren't clobbered
-        cooldown = max(0, int(data["settings"].get("cooldown_min", 60))) * 60
-        for rule in data["rules"]:
-            if not rule.get("enabled"):
-                continue
-            q = quotes.get(rule["symbol"]) or {}
-            active, value = _condition(rule, q)
-            was_active = bool(rule.get("active"))
-            if active and not was_active and (now - rule.get("last_fired", 0)) >= cooldown:
-                event = {
-                    "id": uuid.uuid4().hex[:10],
-                    "rule_id": rule["id"],
-                    "symbol": rule["symbol"],
-                    "name": rule.get("name") or rule["symbol"],
-                    "kind": rule["kind"],
-                    "threshold": rule["threshold"],
-                    "value": value,
-                    "price": q.get("price"),
-                    "message": _message(rule, q),
-                    "ts": now,
-                }
-                data["events"] = (data["events"] + [event])[-MAX_EVENTS:]
-                rule["last_fired"] = now
-                fired.append(event)
-            if active != was_active:
-                rule["active"] = active
-                changed = True
-        if fired or changed:
+        for prof in data["profiles"].values():
+            cooldown = max(0, int(prof["settings"].get("cooldown_min", 60))) * 60
+            fired: list[dict] = []
+            for rule in prof["rules"]:
+                if not rule.get("enabled"):
+                    continue
+                q = quotes.get(rule["symbol"]) or {}
+                active, value = _condition(rule, q)
+                was_active = bool(rule.get("active"))
+                if active and not was_active and (now - rule.get("last_fired", 0)) >= cooldown:
+                    event = {
+                        "id": uuid.uuid4().hex[:10],
+                        "rule_id": rule["id"],
+                        "symbol": rule["symbol"],
+                        "name": rule.get("name") or rule["symbol"],
+                        "kind": rule["kind"],
+                        "threshold": rule["threshold"],
+                        "value": value,
+                        "price": q.get("price"),
+                        "message": _message(rule, q),
+                        "ts": now,
+                    }
+                    prof["events"] = (prof["events"] + [event])[-MAX_EVENTS:]
+                    rule["last_fired"] = now
+                    fired.append(event)
+                if active != was_active:
+                    rule["active"] = active
+                    changed = True
+            if fired:
+                batches.append((fired, dict(prof["settings"])))
+        if batches or changed:
             _write(data)
-        cfg = dict(data["settings"])
 
-    if fired:
+    for fired, cfg in batches:
         _notify(fired, cfg)
-    return len(fired)
+    return sum(len(f) for f, _ in batches)
 
 
 # --- delivery -----------------------------------------------------------------
@@ -340,14 +406,14 @@ def _notify(events: list[dict], cfg: dict) -> None:
                 log.warning("alert text failed: %s", e)
 
 
-def send_test(channel: str) -> dict:
+def send_test(profile: str, channel: str) -> dict:
     """Send a test message so delivery can be verified from the UI."""
     if not smtp_configured():
         return {
             "ok": False,
             "error": "Email isn't set up on the server yet (SMTP_HOST / SMTP_USER / SMTP_PASS secrets).",
         }
-    cfg = get_state()["settings"]
+    cfg = get_state(profile)["settings"]
     try:
         if channel == "sms":
             addr = _sms_address(cfg.get("sms_number", ""), cfg.get("sms_carrier", ""))
