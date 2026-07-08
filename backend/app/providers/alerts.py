@@ -374,9 +374,13 @@ def smtp_configured() -> bool:
 def _send_email(to: list[str], subject: str, body: str) -> None:
     import smtplib
     from email.message import EmailMessage
+    from email.utils import formataddr
 
     msg = EmailMessage()
-    msg["From"] = settings.alerts_from or settings.smtp_user
+    # A friendly display name so texts/emails don't show up as the raw gmail
+    # address (carriers/phones vary in honoring it — saving the sender as a
+    # contact is the sure-fire way).
+    msg["From"] = settings.alerts_from or formataddr(("Markets Alerts", settings.smtp_user))
     msg["To"] = ", ".join(to)
     msg["Subject"] = subject
     msg.set_content(body)
@@ -399,26 +403,6 @@ def _sms_address(number: str, carrier: str) -> str | None:
     return f"{digits}@{gateway}" if gateway and len(digits) == 10 else None
 
 
-def _sms_text(events: list[dict]) -> str:
-    """Carrier gateways silently drop messages with unicode (▲ ± — emoji…),
-    so texts get their own compact, pure-ASCII wording."""
-    lines = []
-    for e in events:
-        val = e.get("value")
-        price = e.get("price")
-        px = f"${price:,.2f}" if isinstance(price, (int, float)) else "n/a"
-        if e["kind"] == "move" and isinstance(val, (int, float)):
-            word = "up" if val >= 0 else "down"
-            lines.append(
-                f"{e['symbol']} {word} {abs(val):.2f}% today at {px} (your {e['threshold']:g}% alert)"
-            )
-        else:
-            word = "above" if e["kind"] == "above" else "below"
-            lines.append(f"{e['symbol']} at {px} - {word} your {e['threshold']:g} target")
-    text = "; ".join(lines)[:150]
-    return text.encode("ascii", "ignore").decode()  # belt & suspenders
-
-
 def _notify(events: list[dict], cfg: dict) -> None:
     if not smtp_configured():
         return
@@ -439,7 +423,12 @@ def _notify(events: list[dict], cfg: dict) -> None:
         addr = _sms_address(cfg.get("sms_number", ""), cfg.get("sms_carrier", ""))
         if addr:
             try:
-                _send_email([addr], subject, _sms_text(events))
+                # Texts keep the same wording as the bell/email (arrows, ± and
+                # all — Verizon delivers them fine; they can land in the
+                # phone's spam/junk list until the sender is marked not-spam).
+                # Gateways truncate around 160 chars.
+                body = "; ".join(e["message"] for e in events)
+                _send_email([addr], subject, body[:150])
             except Exception as e:
                 log.warning("alert text failed: %s", e)
 
@@ -457,7 +446,12 @@ def send_test(profile: str, channel: str) -> dict:
             addr = _sms_address(cfg.get("sms_number", ""), cfg.get("sms_carrier", ""))
             if not addr:
                 return {"ok": False, "error": "Enter a valid 10-digit number and pick a carrier first."}
-            _send_email([addr], "Markets test", "Test alert from your Markets dashboard")
+            # Mirrors a real alert (arrows, ±) so the test proves the format.
+            _send_email(
+                [addr],
+                "Markets test",
+                "Test ✓ Apple (AAPL) ▲ +1.00% today at $310.00 — your ±1% alert (sample)",
+            )
         else:
             to = (cfg.get("email_to") or "").strip()
             if not to:
