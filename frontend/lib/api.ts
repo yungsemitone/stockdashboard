@@ -241,19 +241,49 @@ export type ConvertResult = {
   result: number | null;
 };
 
+// --- family-password auth --------------------------------------------------
+
+const TOKEN_KEY = "dashboard-token";
+
+export const getToken = (): string | null =>
+  typeof window === "undefined" ? null : localStorage.getItem(TOKEN_KEY);
+export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t);
+export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+
+function authHeaders(): Record<string, string> {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
+/** A 401 anywhere means the password is missing/rotated — pop the login gate. */
+function check401(res: Response) {
+  if (res.status === 401 && typeof window !== "undefined") {
+    window.dispatchEvent(new Event("auth:required"));
+  }
+}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const res = await fetch(`${API_URL}${path}`, {
+    cache: "no-store",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    check401(res);
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
   return res.json() as Promise<T>;
 }
 
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    check401(res);
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -279,7 +309,16 @@ export const api = {
     get<{ articles: Article[] }>(`/api/news/${sym(symbol)}`),
   economy: () => get<{ indicators: Indicator[] }>("/api/economy"),
   economyRecap: () => get<EconomyRecap>("/api/economy/recap"),
+  authStatus: () => get<{ required: boolean; ok: boolean }>("/api/auth/status"),
+  authLogin: (password: string) =>
+    send<{ ok: boolean; required: boolean; token?: string }>(
+      "POST",
+      "/api/auth/login",
+      { password },
+    ),
   alertProfiles: () => get<{ profiles: string[] }>("/api/alerts/profiles"),
+  alertProfileCreate: (name: string) =>
+    send<{ profiles: string[] }>("POST", "/api/alerts/profiles", { name }),
   alerts: (profile: string) =>
     get<AlertsState>(`/api/alerts?profile=${encodeURIComponent(profile)}`),
   alertCreate: (
@@ -359,7 +398,7 @@ export async function chatStream(
   const chat = getChatSettings();
   const res = await fetch(`${API_URL}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({
       messages,
       web_search: chat.webSearch,
@@ -367,7 +406,10 @@ export async function chatStream(
     }),
     signal,
   });
-  if (!res.ok || !res.body) throw new Error(`${res.status}`);
+  if (!res.ok || !res.body) {
+    check401(res);
+    throw new Error(`${res.status}`);
+  }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";

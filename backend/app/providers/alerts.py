@@ -128,6 +128,16 @@ def list_profiles() -> list[str]:
         return sorted(_read()["profiles"])
 
 
+def create_profile(name: str) -> list[str]:
+    """Register a profile immediately so the name survives switching even
+    before its first rule or setting is saved."""
+    with _lock:
+        data = _read()
+        _get_or_create(data, name)
+        _write(data)
+        return sorted(data["profiles"])
+
+
 def get_state(profile: str) -> dict:
     with _lock:
         p = _read()["profiles"].get(profile) or _fresh_profile()

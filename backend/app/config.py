@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     smtp_user: str | None = None
     smtp_pass: str | None = None
     alerts_from: str | None = None  # defaults to smtp_user
+    # Shared family password gating the dashboard + API. Unset = auth disabled
+    # (local dev, and production until the secret is set).
+    dashboard_password: str | None = None
 
     @property
     def cors_origin_list(self) -> list[str]:

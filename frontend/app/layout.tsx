@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import Nav from "@/components/Nav";
+import AuthGate from "@/components/AuthGate";
 import ChatWidget from "@/components/ChatWidget";
 import "./globals.css";
 
@@ -38,6 +39,7 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased${themeClass}`}
     >
       <body className="min-h-full flex flex-col">
+        <AuthGate>
         <Nav />
 
         <div className="flex-1">{children}</div>
@@ -59,6 +61,7 @@ export default async function RootLayout({
         </footer>
 
         <ChatWidget />
+        </AuthGate>
       </body>
     </html>
   );

@@ -75,6 +75,19 @@ def alert_profiles():
     return {"profiles": alerts.list_profiles()}
 
 
+class ProfileIn(BaseModel):
+    name: str
+
+
+@router.post("/alerts/profiles")
+def create_alert_profile(body: ProfileIn):
+    """Register a name right away so it persists before any rules exist."""
+    try:
+        return {"profiles": alerts.create_profile(_check_name(body.name))}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.get("/alerts/events")
 def alert_events(since: float = 0, profile: str = Profile):
     """Trigger events newer than `since` (epoch seconds) — polled by the bell."""

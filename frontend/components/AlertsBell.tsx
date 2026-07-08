@@ -92,6 +92,9 @@ export default function AlertsBell() {
   const choose = (name: string) => {
     const clean = name.trim().slice(0, 24);
     if (!clean) return;
+    // Register server-side right away so the name survives switching even
+    // before any rules are added.
+    api.alertProfileCreate(clean).catch(() => {});
     localStorage.setItem(PROFILE_KEY, clean);
     lastNotified.current = Date.now() / 1000 - 60;
     setState(null);
