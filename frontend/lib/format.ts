@@ -23,6 +23,15 @@ export function fmtPct(n: number | null | undefined): string {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
+/** Signed absolute change with the same digits as prices: "+2.31", "-0.0042". */
+export function fmtChange(
+  n: number | null | undefined,
+  opts: PriceOpts = false,
+): string {
+  if (n == null || Number.isNaN(n)) return "—";
+  return `${n >= 0 ? "+" : "-"}${fmtPrice(Math.abs(n), opts)}`;
+}
+
 export function fmtCompact(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return "—";
   return new Intl.NumberFormat("en-US", {
@@ -61,19 +70,52 @@ export function fmtEventDate(iso: string): string {
   });
 }
 
-// Given a quote and a live streamed price, recompute the day's % change so the
+// Given a quote and a live streamed price, recompute the day's change so the
 // streamed price and its change stay consistent (derives prev close from the quote).
 export function liveQuote(
   quote: { price: number | null; change: number | null; change_pct: number | null },
   live: number | undefined,
-): { price: number | null; change_pct: number | null } {
-  if (live == null) return { price: quote.price, change_pct: quote.change_pct };
+): { price: number | null; change: number | null; change_pct: number | null } {
+  if (live == null)
+    return { price: quote.price, change: quote.change, change_pct: quote.change_pct };
   const prevClose =
     quote.price != null && quote.change != null ? quote.price - quote.change : null;
   if (prevClose && prevClose !== 0) {
-    return { price: live, change_pct: ((live - prevClose) / prevClose) * 100 };
+    return {
+      price: live,
+      change: live - prevClose,
+      change_pct: ((live - prevClose) / prevClose) * 100,
+    };
   }
-  return { price: live, change_pct: quote.change_pct };
+  return { price: live, change: quote.change, change_pct: quote.change_pct };
+}
+
+/** An event's ET wall time ("8:30 AM ET") shown in the viewer's timezone. */
+export function fmtEventTimeLocal(dateISO: string, timeET: string): string {
+  const m = timeET.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!m) return timeET;
+  let hour = parseInt(m[1], 10) % 12;
+  if (/pm/i.test(m[3])) hour += 12;
+  const minute = parseInt(m[2], 10);
+  // Resolve ET's UTC offset for that date (handles EDT/EST) via Intl.
+  const probe = new Date(`${dateISO}T12:00:00Z`);
+  const offPart = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    timeZoneName: "longOffset",
+  })
+    .formatToParts(probe)
+    .find((p) => p.type === "timeZoneName")?.value;
+  const om = offPart?.match(/GMT([+-])(\d{2}):(\d{2})/);
+  const offMin = om
+    ? (om[1] === "-" ? -1 : 1) * (parseInt(om[2], 10) * 60 + parseInt(om[3], 10))
+    : -300;
+  const [y, mo, d] = dateISO.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, mo - 1, d, hour, minute) - offMin * 60000);
+  const local = dt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const tz = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+    .formatToParts(dt)
+    .find((p) => p.type === "timeZoneName")?.value;
+  return tz ? `${local} ${tz}` : local;
 }
 
 // Color an economic indicator's most recent change given which direction is "good".

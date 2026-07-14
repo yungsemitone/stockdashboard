@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { Quote, ClassSummary } from "@/lib/api";
-import { fmtPct, changeColor, liveQuote } from "@/lib/format";
+import { fmtChange, fmtPct, changeColor, liveQuote } from "@/lib/format";
 import LivePrice from "./LivePrice";
 
 const SCOPE_WORD: Record<string, string> = {
@@ -42,7 +42,7 @@ export default function ClassSection({
       ) : (
         <div className="divide-y divide-neutral-800/70">
           {items.map((q) => {
-            const { price, change_pct } = liveQuote(q, live?.[q.symbol]);
+            const { price, change, change_pct } = liveQuote(q, live?.[q.symbol]);
             return (
               <Link
                 key={q.symbol}
@@ -61,7 +61,12 @@ export default function ClassSection({
                     className="tabular-nums"
                   />
                   <div className={`text-sm tabular-nums ${changeColor(change_pct)}`}>
-                    {fmtPct(change_pct)}
+                    {change != null && (
+                      <span>
+                        {fmtChange(change, { level: q.is_level, fx: q.is_fx })}{" "}
+                      </span>
+                    )}
+                    {change != null ? `(${fmtPct(change_pct)})` : fmtPct(change_pct)}
                   </div>
                 </div>
               </Link>

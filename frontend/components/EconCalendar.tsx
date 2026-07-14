@@ -2,7 +2,7 @@
 
 import { api, type CalEvent } from "@/lib/api";
 import { usePoll } from "@/lib/usePoll";
-import { fmtEventDate } from "@/lib/format";
+import { fmtEventDate, fmtEventTimeLocal } from "@/lib/format";
 
 const DOT: Record<string, string> = {
   high: "bg-rose-400",
@@ -54,7 +54,9 @@ export default function EconCalendar({ limit }: { limit?: number }) {
                   </span>
                 </div>
                 {e.time_et && (
-                  <div className="text-xs text-neutral-600">{e.time_et}</div>
+                  <div className="text-xs text-neutral-600">
+                    {fmtEventTimeLocal(e.date, e.time_et)}
+                  </div>
                 )}
                 <p className="mt-1 text-xs text-neutral-500 leading-relaxed">
                   {e.implication}

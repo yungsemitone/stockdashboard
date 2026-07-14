@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { readSetting, writeSetting } from "@/lib/settings";
 
-type Theme = "dark" | "light";
+type Theme = "dark" | "light" | "auto";
 
 type Opt = { value: string; label: string };
 
@@ -68,9 +68,8 @@ export default function SettingsMenu() {
   const [cleared, setCleared] = useState(false);
 
   useEffect(() => {
-    setTheme(
-      document.documentElement.classList.contains("theme-light") ? "light" : "dark",
-    );
+    const cl = document.documentElement.classList;
+    setTheme(cl.contains("theme-light") ? "light" : cl.contains("theme-auto") ? "auto" : "dark");
     setIndices(readSetting("indicesMode", "futures"));
     setRefresh(readSetting("refreshRate", "live"));
     setWebSearch(readSetting("chatWebSearch", "on") !== "off");
@@ -89,6 +88,7 @@ export default function SettingsMenu() {
     setTheme(t);
     document.cookie = `theme=${t}; path=/; max-age=31536000; SameSite=Lax`;
     document.documentElement.classList.toggle("theme-light", t === "light");
+    document.documentElement.classList.toggle("theme-auto", t === "auto");
   };
 
   const applyIndices = (v: string) => {
@@ -137,11 +137,15 @@ export default function SettingsMenu() {
 
       {open && (
         <div className="absolute right-0 z-30 mt-2 max-h-[80vh] w-72 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 p-3 shadow-2xl">
-          <Section title="Appearance">
+          <Section
+            title="Appearance"
+            hint={theme === "auto" ? "Follows your device's light/dark setting." : undefined}
+          >
             <Segmented
               options={[
                 { value: "dark", label: "Dark" },
                 { value: "light", label: "Light" },
+                { value: "auto", label: "Auto" },
               ]}
               value={theme}
               onChange={(v) => applyTheme(v as Theme)}

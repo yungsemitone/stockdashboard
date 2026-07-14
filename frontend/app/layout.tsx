@@ -30,7 +30,8 @@ export default async function RootLayout({
   // Read the theme cookie at render time so the right theme is in the initial
   // HTML — no flash, and no client-side script.
   const theme = (await cookies()).get("theme")?.value;
-  const themeClass = theme === "light" ? " theme-light" : "";
+  const themeClass =
+    theme === "light" ? " theme-light" : theme === "auto" ? " theme-auto" : "";
 
   return (
     <html

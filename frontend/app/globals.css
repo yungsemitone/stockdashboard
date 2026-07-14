@@ -28,3 +28,15 @@ html.theme-light {
 html.theme-light body {
   filter: invert(1) hue-rotate(180deg);
 }
+
+/* Auto follows the OS: same inversion as Light, but only when the system
+   prefers light. Pure CSS, so the server never needs to know the OS setting
+   (no flash, no scripts). */
+@media (prefers-color-scheme: light) {
+  html.theme-auto {
+    background: #ffffff;
+  }
+  html.theme-auto body {
+    filter: invert(1) hue-rotate(180deg);
+  }
+}

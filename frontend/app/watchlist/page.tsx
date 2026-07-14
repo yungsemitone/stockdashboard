@@ -6,7 +6,7 @@ import { api, type WatchList } from "@/lib/api";
 import { usePoll } from "@/lib/usePoll";
 import { usePriceStream } from "@/lib/usePriceStream";
 import LivePrice from "@/components/LivePrice";
-import { fmtPct, changeColor, liveQuote } from "@/lib/format";
+import { fmtChange, fmtPct, changeColor, liveQuote } from "@/lib/format";
 
 export default function WatchlistPage() {
   const { data } = usePoll(() => api.watchlists(), 30_000, []);
@@ -169,7 +169,7 @@ export default function WatchlistPage() {
                   </Link>
                   <div className="text-right shrink-0 mr-4">
                     {(() => {
-                      const { price, change_pct } = liveQuote(q, live[q.symbol]);
+                      const { price, change, change_pct } = liveQuote(q, live[q.symbol]);
                       return (
                         <>
                           <LivePrice
@@ -179,7 +179,14 @@ export default function WatchlistPage() {
                             className="tabular-nums"
                           />
                           <div className={`text-sm tabular-nums ${changeColor(change_pct)}`}>
-                            {fmtPct(change_pct)}
+                            {change != null && (
+                              <span>
+                                {fmtChange(change, { level: q.is_level, fx: q.is_fx })}{" "}
+                              </span>
+                            )}
+                            {change != null
+                              ? `(${fmtPct(change_pct)})`
+                              : fmtPct(change_pct)}
                           </div>
                         </>
                       );
