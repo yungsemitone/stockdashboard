@@ -54,10 +54,13 @@ DEFAULT_SETTINGS = {
     "sms_number": "",
     "sms_carrier": "verizon",
     "cooldown_min": 60,
-    # Morning digest (weekday email brief; see providers/digest.py).
+    # Morning brief / evening wrap (weekday emails; see providers/digest.py).
     "digest_enabled": False,
     "digest_time": "07:30",  # ET
     "digest_last": "",  # date last sent, YYYY-MM-DD (internal)
+    "evening_enabled": False,
+    "evening_time": "16:30",  # ET, after the close
+    "evening_last": "",
 }
 
 MAX_RULES = 50
@@ -285,14 +288,16 @@ def update_settings(user_id: str, patch: dict) -> dict:
                 cfg["cooldown_min"] = min(1440, max(0, int(patch["cooldown_min"])))
             except (TypeError, ValueError):
                 pass
-        if "digest_enabled" in patch:
-            cfg["digest_enabled"] = bool(patch["digest_enabled"])
-        if "digest_time" in patch:
-            t = str(patch["digest_time"]).strip()
-            if len(t) == 5 and t[2] == ":" and t.replace(":", "").isdigit():
-                hh, mm = int(t[:2]), int(t[3:])
-                if 0 <= hh < 24 and 0 <= mm < 60:
-                    cfg["digest_time"] = t
+        for flag in ("digest_enabled", "evening_enabled"):
+            if flag in patch:
+                cfg[flag] = bool(patch[flag])
+        for key in ("digest_time", "evening_time"):
+            if key in patch:
+                t = str(patch[key]).strip()
+                if len(t) == 5 and t[2] == ":" and t.replace(":", "").isdigit():
+                    hh, mm = int(t[:2]), int(t[3:])
+                    if 0 <= hh < 24 and 0 <= mm < 60:
+                        cfg[key] = t
         _write(data)
     return get_state(user_id)
 
@@ -303,12 +308,13 @@ def user_ids() -> list[str]:
         return list(_read()["users"].keys())
 
 
-def mark_digest_sent(user_id: str, date_str: str) -> None:
+def mark_digest_sent(user_id: str, date_str: str, kind: str = "morning") -> None:
+    key = "evening_last" if kind == "evening" else "digest_last"
     with _lock:
         data = _read()
         p = data["users"].get(user_id)
         if p:
-            p["settings"]["digest_last"] = date_str
+            p["settings"][key] = date_str
             _write(data)
 
 
@@ -441,13 +447,13 @@ def smtp_configured() -> bool:
     return bool(settings.smtp_host and settings.smtp_user and settings.smtp_pass)
 
 
-def send_email(to: list[str], subject: str, body: str) -> None:
+def send_email(to: list[str], subject: str, body: str, html: str | None = None) -> None:
     """Public helper for other features (password resets, the digest) that
     ride the same SMTP pipe as alerts."""
-    _send_email(to, subject, body)
+    _send_email(to, subject, body, html)
 
 
-def _send_email(to: list[str], subject: str, body: str) -> None:
+def _send_email(to: list[str], subject: str, body: str, html: str | None = None) -> None:
     import smtplib
     from email.message import EmailMessage
     from email.utils import formataddr
@@ -460,6 +466,8 @@ def _send_email(to: list[str], subject: str, body: str) -> None:
     msg["To"] = ", ".join(to)
     msg["Subject"] = subject
     msg.set_content(body)
+    if html:
+        msg.add_alternative(html, subtype="html")
     if settings.smtp_port == 465:
         with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=15) as s:
             s.login(settings.smtp_user, settings.smtp_pass)

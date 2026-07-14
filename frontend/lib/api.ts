@@ -238,6 +238,9 @@ export type AlertSettings = {
   digest_enabled: boolean;
   digest_time: string; // "HH:MM" ET
   digest_last: string;
+  evening_enabled: boolean;
+  evening_time: string; // "HH:MM" ET
+  evening_last: string;
 };
 
 export type AlertsState = {
@@ -371,7 +374,8 @@ export const api = {
       "/api/auth/reset",
       { identifier, code, password },
     ),
-  digestSend: () => send<{ ok: boolean; error?: string }>("POST", "/api/digest/send"),
+  digestSend: (kind: "morning" | "evening") =>
+    send<{ ok: boolean; error?: string }>("POST", "/api/digest/send", { kind }),
   alerts: () => get<AlertsState>("/api/alerts"),
   alertCreate: (rule: {
     symbol: string;

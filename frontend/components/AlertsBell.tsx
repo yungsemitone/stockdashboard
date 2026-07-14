@@ -205,16 +205,16 @@ export default function AlertsBell() {
     }
   };
 
-  const sendDigestNow = async () => {
-    setTestMsg((m) => ({ ...m, digest: "Building your brief…" }));
+  const sendDigestNow = async (kind: "morning" | "evening") => {
+    setTestMsg((m) => ({ ...m, [kind]: "Building your brief…" }));
     try {
-      const r = await api.digestSend();
+      const r = await api.digestSend(kind);
       setTestMsg((m) => ({
         ...m,
-        digest: r.ok ? "Sent ✓ — check your inbox" : r.error || "Failed",
+        [kind]: r.ok ? "Sent ✓ — check your inbox" : r.error || "Failed",
       }));
     } catch {
-      setTestMsg((m) => ({ ...m, digest: "Failed to reach the server" }));
+      setTestMsg((m) => ({ ...m, [kind]: "Failed to reach the server" }));
     }
   };
 
@@ -504,44 +504,71 @@ export default function AlertsBell() {
                 </div>
               )}
 
-              <div className="mt-3 flex items-center justify-between gap-2">
-                <span className="text-sm text-neutral-300">Morning digest</span>
-                <Toggle
-                  on={settings.digest_enabled}
-                  onChange={() =>
-                    patchSettings({ digest_enabled: !settings.digest_enabled })
-                  }
-                />
-              </div>
-              {settings.digest_enabled && (
-                <div className="mt-2 space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="time"
-                      defaultValue={settings.digest_time}
-                      onBlur={(e) =>
-                        e.target.value && patchSettings({ digest_time: e.target.value })
-                      }
-                      className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm outline-none focus:border-neutral-600"
+              {(
+                [
+                  {
+                    kind: "morning" as const,
+                    label: "☀️ Morning brief",
+                    enabled: settings.digest_enabled,
+                    time: settings.digest_time,
+                    enabledKey: "digest_enabled" as const,
+                    timeKey: "digest_time" as const,
+                    blurb:
+                      "Weekday mornings, before the open: futures, your watchlist pre-market, today's calendar, and what to watch.",
+                  },
+                  {
+                    kind: "evening" as const,
+                    label: "🌙 Evening wrap",
+                    enabled: settings.evening_enabled,
+                    time: settings.evening_time,
+                    enabledKey: "evening_enabled" as const,
+                    timeKey: "evening_time" as const,
+                    blurb:
+                      "Weekdays after the close: how the indices and your watchlist finished, and the story of the day.",
+                  },
+                ]
+              ).map((ed) => (
+                <div key={ed.kind}>
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <span className="text-sm text-neutral-300">{ed.label}</span>
+                    <Toggle
+                      on={ed.enabled}
+                      onChange={() => patchSettings({ [ed.enabledKey]: !ed.enabled })}
                     />
-                    <span className="text-xs text-neutral-500">ET</span>
-                    <div className="flex-1" />
-                    <button
-                      onClick={sendDigestNow}
-                      className="rounded-md border border-neutral-700 px-2 py-1.5 text-xs text-neutral-300 hover:border-neutral-500"
-                    >
-                      Send now
-                    </button>
                   </div>
-                  <p className="text-[11px] leading-snug text-neutral-600">
-                    Weekday mornings by email: index futures, your watchlist
-                    movers, today&apos;s calendar, and a short AI take.
-                  </p>
-                  {testMsg.digest && (
-                    <p className="text-[11px] text-neutral-400">{testMsg.digest}</p>
+                  {ed.enabled && (
+                    <div className="mt-2 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="time"
+                          defaultValue={ed.time}
+                          onBlur={(e) =>
+                            e.target.value &&
+                            patchSettings({ [ed.timeKey]: e.target.value })
+                          }
+                          className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm outline-none focus:border-neutral-600"
+                        />
+                        <span className="text-xs text-neutral-500">ET</span>
+                        <div className="flex-1" />
+                        <button
+                          onClick={() => sendDigestNow(ed.kind)}
+                          className="rounded-md border border-neutral-700 px-2 py-1.5 text-xs text-neutral-300 hover:border-neutral-500"
+                        >
+                          Send now
+                        </button>
+                      </div>
+                      <p className="text-[11px] leading-snug text-neutral-600">
+                        {ed.blurb}
+                      </p>
+                      {testMsg[ed.kind] && (
+                        <p className="text-[11px] text-neutral-400">
+                          {testMsg[ed.kind]}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
+              ))}
             </div>
           )}
         </div>

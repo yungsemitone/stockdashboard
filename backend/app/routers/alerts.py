@@ -32,6 +32,8 @@ class SettingsPatch(BaseModel):
     cooldown_min: int | None = None
     digest_enabled: bool | None = None
     digest_time: str | None = None
+    evening_enabled: bool | None = None
+    evening_time: str | None = None
 
 
 class TestIn(BaseModel):
@@ -108,11 +110,15 @@ def adopt_legacy(body: AdoptIn, request: Request):
     return alerts.adopt_legacy_profile(body.legacy_name, account["id"])
 
 
+class DigestSendIn(BaseModel):
+    kind: str = "morning"  # morning | evening
+
+
 @router.post("/digest/send")
-def send_digest_now(request: Request):
-    """Send the caller's morning digest immediately (preview / test)."""
+def send_digest_now(request: Request, body: DigestSendIn | None = None):
+    """Send the caller's brief immediately (preview / test)."""
     user = auth.require_account(request)
-    return digest.send_to(user["id"])
+    return digest.send_to(user["id"], (body or DigestSendIn()).kind)
 
 
 @router.put("/alerts/{rule_id}")
