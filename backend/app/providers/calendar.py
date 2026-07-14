@@ -57,7 +57,10 @@ def _first_friday(year: int, month: int) -> date:
 
 def _approx(year: int, month: int, day: int) -> date:
     last = _cal.monthrange(year, month)[1]
-    return date(year, month, min(day, last))
+    d = date(year, month, min(day, last))
+    while d.weekday() >= 5:  # releases never land on weekends — roll to Monday
+        d += timedelta(days=1)
+    return d
 
 
 def _months_ahead(today: date, n: int):
@@ -70,14 +73,42 @@ def upcoming(days_ahead: int = 45) -> list[dict]:
     global _cache
     if _cache and time.time() - _cache[0] < _TTL:
         return _cache[1]
+    events = _generate(date.today(), date.today() + timedelta(days=days_ahead))
+    _cache = (time.time(), events)
+    return events
 
-    today = date.today()
-    horizon = today + timedelta(days=days_ahead)
+
+def events_for_date(target: date | None = None,
+                    tiers: tuple = ("high", "medium")) -> list[dict]:
+    """The day's events for the digest. Approximate releases (CPI & co. sit on
+    their *typical* day, which can drift a couple of days) count when they're
+    within 2 days of the target, so a real release can't go missing — they
+    keep their `approximate` flag so callers can mark them ≈. Unlike
+    upcoming(), this can look back at dates already passed."""
+    target = target or date.today()
+    if target.weekday() >= 5:
+        return []
+    window = _generate(target - timedelta(days=2), target + timedelta(days=2))
+    out: list[dict] = []
+    seen: set[str] = set()
+    for e in sorted(window, key=lambda e: abs((date.fromisoformat(e["date"]) - target).days)):
+        if e["importance"] not in tiers or e["name"] in seen:
+            continue
+        delta = abs((date.fromisoformat(e["date"]) - target).days)
+        if (e["approximate"] and delta <= 2) or (not e["approximate"] and delta == 0):
+            seen.add(e["name"])
+            out.append(e)
+    rank = {"high": 0, "medium": 1, "low": 2}
+    out.sort(key=lambda e: (rank[e["importance"]], e.get("time_et") or "~"))
+    return out
+
+
+def _generate(start: date, horizon: date) -> list[dict]:
     events: list[dict] = []
 
     def add(d: date, name: str, importance: str, key: str,
             approximate: bool = False, time_et: str | None = None) -> None:
-        if today <= d <= horizon:
+        if start <= d <= horizon:
             events.append({
                 "date": d.isoformat(),
                 "name": name,
@@ -90,7 +121,7 @@ def upcoming(days_ahead: int = 45) -> list[dict]:
     for d in FOMC_2026:
         add(d, "FOMC Rate Decision", "high", "fomc", time_et="2:00 PM ET")
 
-    for yy, mm in _months_ahead(today, 2):
+    for yy, mm in _months_ahead(start, 2):
         nfp = _first_friday(yy, mm)
         add(nfp, "Jobs Report (Nonfarm Payrolls)", "high", "nfp", time_et="8:30 AM ET")
         # ADP lands the Wednesday before the Friday jobs report.
@@ -110,7 +141,7 @@ def upcoming(days_ahead: int = 45) -> list[dict]:
         add(_approx(yy, mm, 28), "Core PCE Price Index", "high", "pce", approximate=True, time_et="8:30 AM ET")
         add(_approx(yy, mm, 28), "GDP (quarterly)", "high", "gdp", approximate=True, time_et="8:30 AM ET")
 
-    d = today
+    d = start
     while d <= horizon:
         if d.weekday() == 3:  # Thursday
             add(d, "Initial Jobless Claims", "low", "claims", time_et="8:30 AM ET")
@@ -118,6 +149,4 @@ def upcoming(days_ahead: int = 45) -> list[dict]:
 
     rank = {"high": 0, "medium": 1, "low": 2}
     events.sort(key=lambda e: (e["date"], rank[e["importance"]]))
-
-    _cache = (time.time(), events)
     return events

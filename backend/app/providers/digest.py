@@ -69,10 +69,13 @@ def _gather(user_id: str) -> dict:
 
     cal: list[dict] = []
     try:
-        today = et.strftime("%Y-%m-%d")
-        for e in econ_calendar.upcoming(2):
-            if e.get("date") == today:
-                cal.append({"name": e["name"], "time": e.get("time_et") or "time TBD"})
+        # High + medium tier events on (or, for typical-day releases like CPI,
+        # around) today — the ±2-day window means date drift can't hide them.
+        for e in econ_calendar.events_for_date(et.date()):
+            t = e.get("time_et") or "time TBD"
+            if e.get("approximate"):
+                t = f"≈ {t}"
+            cal.append({"name": e["name"], "time": t, "importance": e["importance"]})
     except Exception:
         pass
 
@@ -233,13 +236,20 @@ def _html(d: dict, take: str, kind: str, username: str) -> str:
         else '<div style="font-size:13px;color:#a8a29e;">Nothing on your watchlist yet.</div>'
     )
     if d["calendar"]:
-        cal = "".join(
-            '<tr><td style="padding:6px 0;font-size:14px;color:#44403c;">'
-            f'{e["name"]}</td><td align="right" style="padding:6px 0;font-size:13px;'
-            f'color:#78716c;white-space:nowrap;">{e["time"]}</td></tr>'
-            for e in d["calendar"]
-        )
-        cal = f'<table width="100%" cellpadding="0" cellspacing="0">{cal}</table>'
+        dot_colors = {"high": "#e11d48", "medium": "#d97706"}
+        rows = []
+        for e in d["calendar"]:
+            dot = (
+                f'<span style="display:inline-block;width:8px;height:8px;'
+                f'border-radius:999px;background:{dot_colors.get(e.get("importance", ""), "#d6d3d1")};'
+                'margin-right:8px;"></span>'
+            )
+            rows.append(
+                '<tr><td style="padding:6px 0;font-size:14px;color:#44403c;">'
+                f'{dot}{e["name"]}</td><td align="right" style="padding:6px 0;'
+                f'font-size:13px;color:#78716c;white-space:nowrap;">{e["time"]}</td></tr>'
+            )
+        cal = f'<table width="100%" cellpadding="0" cellspacing="0">{"".join(rows)}</table>'
     else:
         cal = '<div style="font-size:13px;color:#a8a29e;">No major releases today.</div>'
 
