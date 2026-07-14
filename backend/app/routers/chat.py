@@ -20,6 +20,7 @@ from ..config import settings
 from ..providers import analyst
 from ..providers import calendar as econ_calendar
 from ..providers import economy, market, news, search, watchlist
+from . import auth
 
 router = APIRouter()
 
@@ -116,9 +117,9 @@ TOOLS = DASHBOARD_TOOLS + [WEB_SEARCH_TOOL]
 CHAT_MODELS = {"fast": settings.chat_model, "deep": "claude-opus-4-8"}
 
 
-def _run_tool(name: str, inp: dict) -> dict:
+def _run_tool(name: str, inp: dict, user_id: str | None = None) -> dict:
     if name == "get_watchlists":
-        lists = watchlist.get_all()
+        lists = watchlist.get_all(user_id)
         syms = sorted({s for l in lists for s in l["symbols"]})
         q = {x["symbol"]: x for x in market.quotes_for(syms)}
         return {
@@ -203,6 +204,13 @@ def chat(req: ChatRequest, request: Request):
     tools = DASHBOARD_TOOLS + ([WEB_SEARCH_TOOL] if req.web_search else [])
     model_id = CHAT_MODELS.get(req.model, settings.chat_model)
 
+    # Whose data the tools see (their watchlists). 401s were already handled by
+    # the middleware; this resolves session → account, service/dev → primary.
+    try:
+        chat_user_id: str | None = auth.current_account(request)["id"]
+    except HTTPException:
+        chat_user_id = None
+
     def stream():
         try:
             import anthropic
@@ -236,7 +244,7 @@ def chat(req: ChatRequest, request: Request):
                     if getattr(block, "type", "") == "tool_use":
                         yield _sse({"type": "status", "text": _status_for(block.name, block.input or {})})
                         try:
-                            out = _run_tool(block.name, block.input or {})
+                            out = _run_tool(block.name, block.input or {}, chat_user_id)
                         except Exception as e:
                             out = {"error": str(e)}
                         results.append({

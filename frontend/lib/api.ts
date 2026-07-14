@@ -238,7 +238,6 @@ export type AlertSettings = {
 };
 
 export type AlertsState = {
-  profile: string;
   rules: AlertRule[];
   settings: AlertSettings;
   events: AlertEvent[];
@@ -254,14 +253,30 @@ export type ConvertResult = {
   result: number | null;
 };
 
-// --- family-password auth --------------------------------------------------
+// --- account auth ------------------------------------------------------------
 
 const TOKEN_KEY = "dashboard-token";
+const USER_KEY = "dashboard-user";
+
+export type User = { id: string; username: string; email: string };
 
 export const getToken = (): string | null =>
   typeof window === "undefined" ? null : localStorage.getItem(TOKEN_KEY);
 export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t);
-export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+export const clearToken = () => {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+};
+
+export const getUser = (): User | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    return JSON.parse(localStorage.getItem(USER_KEY) || "null");
+  } catch {
+    return null;
+  }
+};
+export const setUser = (u: User) => localStorage.setItem(USER_KEY, JSON.stringify(u));
 
 function authHeaders(): Record<string, string> {
   const t = getToken();
@@ -322,61 +337,48 @@ export const api = {
     get<{ articles: Article[] }>(`/api/news/${sym(symbol)}`),
   economy: () => get<{ indicators: Indicator[] }>("/api/economy"),
   economyRecap: () => get<EconomyRecap>("/api/economy/recap"),
-  authStatus: () => get<{ required: boolean; ok: boolean }>("/api/auth/status"),
-  authLogin: (password: string) =>
-    send<{ ok: boolean; required: boolean; token?: string }>(
+  authStatus: () =>
+    get<{ required: boolean; ok: boolean; has_accounts: boolean }>(
+      "/api/auth/status",
+    ),
+  authSignup: (body: {
+    email: string;
+    username: string;
+    password: string;
+    code: string;
+  }) =>
+    send<{ ok: boolean; error?: string; token?: string; user?: User }>(
+      "POST",
+      "/api/auth/signup",
+      body,
+    ),
+  authLogin: (identifier: string, password: string) =>
+    send<{ ok: boolean; error?: string; token?: string; user?: User }>(
       "POST",
       "/api/auth/login",
-      { password },
+      { identifier, password },
     ),
-  alertProfiles: () => get<{ profiles: string[] }>("/api/alerts/profiles"),
-  alertProfileCreate: (name: string) =>
-    send<{ profiles: string[] }>("POST", "/api/alerts/profiles", { name }),
-  alertProfileDelete: (name: string) =>
-    send<{ profiles: string[] }>(
-      "DELETE",
-      `/api/alerts/profiles/${encodeURIComponent(name)}`,
-    ),
-  alerts: (profile: string) =>
-    get<AlertsState>(`/api/alerts?profile=${encodeURIComponent(profile)}`),
-  alertCreate: (
-    profile: string,
-    rule: {
-      symbol: string;
-      name?: string;
-      kind: string;
-      threshold: number;
-      direction?: string;
-    },
-  ) => send<AlertsState>("POST", `/api/alerts?profile=${encodeURIComponent(profile)}`, rule),
+  authLogout: () => send<{ ok: boolean }>("POST", "/api/auth/logout"),
+  authMe: () => get<{ user: User }>("/api/auth/me"),
+  alerts: () => get<AlertsState>("/api/alerts"),
+  alertCreate: (rule: {
+    symbol: string;
+    name?: string;
+    kind: string;
+    threshold: number;
+    direction?: string;
+  }) => send<AlertsState>("POST", "/api/alerts", rule),
   alertUpdate: (
-    profile: string,
     id: string,
     patch: { enabled?: boolean; threshold?: number; direction?: string },
-  ) =>
-    send<AlertsState>(
-      "PUT",
-      `/api/alerts/${id}?profile=${encodeURIComponent(profile)}`,
-      patch,
-    ),
-  alertDelete: (profile: string, id: string) =>
-    send<AlertsState>("DELETE", `/api/alerts/${id}?profile=${encodeURIComponent(profile)}`),
-  alertSettings: (profile: string, patch: Partial<AlertSettings>) =>
-    send<AlertsState>(
-      "PUT",
-      `/api/alerts/settings?profile=${encodeURIComponent(profile)}`,
-      patch,
-    ),
-  alertTest: (profile: string, channel: "email" | "sms") =>
-    send<{ ok: boolean; error?: string }>(
-      "POST",
-      `/api/alerts/test?profile=${encodeURIComponent(profile)}`,
-      { channel },
-    ),
-  alertEvents: (profile: string, since: number) =>
-    get<{ events: AlertEvent[]; now: number }>(
-      `/api/alerts/events?since=${since}&profile=${encodeURIComponent(profile)}`,
-    ),
+  ) => send<AlertsState>("PUT", `/api/alerts/${id}`, patch),
+  alertDelete: (id: string) => send<AlertsState>("DELETE", `/api/alerts/${id}`),
+  alertSettings: (patch: Partial<AlertSettings>) =>
+    send<AlertsState>("PUT", "/api/alerts/settings", patch),
+  alertTest: (channel: "email" | "sms") =>
+    send<{ ok: boolean; error?: string }>("POST", "/api/alerts/test", { channel }),
+  alertEvents: (since: number) =>
+    get<{ events: AlertEvent[]; now: number }>(`/api/alerts/events?since=${since}`),
   universeConfig: () => get<UniverseConfig>("/api/universe/config"),
   universeSave: (
     classes: { key: string; visible: boolean; symbols: UniverseSymbol[] }[],

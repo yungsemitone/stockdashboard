@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { api, clearToken, getUser, type User } from "@/lib/api";
 import { readSetting, writeSetting } from "@/lib/settings";
 
 type Theme = "dark" | "light" | "auto";
@@ -61,6 +62,7 @@ export default function SettingsMenu() {
   // Theme lives in a cookie (read by the server for no-flash SSR); the rest are
   // localStorage settings read through the settings module.
   const [theme, setTheme] = useState<Theme>("dark");
+  const [account, setAccount] = useState<User | null>(null);
   const [indices, setIndices] = useState("futures");
   const [refresh, setRefresh] = useState("live");
   const [webSearch, setWebSearch] = useState(true);
@@ -68,6 +70,7 @@ export default function SettingsMenu() {
   const [cleared, setCleared] = useState(false);
 
   useEffect(() => {
+    setAccount(getUser());
     const cl = document.documentElement.classList;
     setTheme(cl.contains("theme-light") ? "light" : cl.contains("theme-auto") ? "auto" : "dark");
     setIndices(readSetting("indicesMode", "futures"));
@@ -137,6 +140,35 @@ export default function SettingsMenu() {
 
       {open && (
         <div className="absolute right-0 z-30 mt-2 max-h-[80vh] w-72 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 p-3 shadow-2xl">
+          {account && (
+            <Section title="Account">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm text-neutral-200">
+                    {account.username}
+                  </div>
+                  <div className="truncate text-[11px] text-neutral-500">
+                    {account.email}
+                  </div>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      await api.authLogout();
+                    } catch {
+                      /* signing out locally regardless */
+                    }
+                    clearToken();
+                    window.location.reload();
+                  }}
+                  className="shrink-0 rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 transition hover:border-neutral-500"
+                >
+                  Sign out
+                </button>
+              </div>
+            </Section>
+          )}
+
           <Section
             title="Appearance"
             hint={theme === "auto" ? "Follows your device's light/dark setting." : undefined}

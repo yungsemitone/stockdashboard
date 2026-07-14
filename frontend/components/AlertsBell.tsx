@@ -3,13 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
   api,
+  getToken,
   type AlertEvent,
   type AlertsState,
   type SearchResult,
 } from "@/lib/api";
 
-const PROFILE_KEY = "alerts-profile";
-const SEEN_KEY = "alerts-seen-ts"; // per profile: `${SEEN_KEY}:${name}`
+const SEEN_KEY = "alerts-seen-ts";
 
 // One dropdown folds kind + direction into a plain-English condition.
 const CONDITIONS = [
@@ -60,10 +60,6 @@ function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
 
 export default function AlertsBell() {
   const [open, setOpen] = useState(false);
-  const [profile, setProfile] = useState<string | null>(null);
-  const [profiles, setProfiles] = useState<string[]>([]);
-  const [newName, setNewName] = useState("");
-  const [armDelete, setArmDelete] = useState<string | null>(null);
   const [state, setState] = useState<AlertsState | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [toasts, setToasts] = useState<AlertEvent[]>([]);
@@ -79,62 +75,24 @@ export default function AlertsBell() {
   const [threshold, setThreshold] = useState("");
   const [testMsg, setTestMsg] = useState<Record<string, string>>({});
 
-  const seenTs = (p: string) => Number(localStorage.getItem(`${SEEN_KEY}:${p}`) || 0);
-  const markSeen = (p: string) => {
-    localStorage.setItem(`${SEEN_KEY}:${p}`, String(Date.now() / 1000));
+  const seenTs = () => Number(localStorage.getItem(SEEN_KEY) || 0);
+  const markSeen = () => {
+    localStorage.setItem(SEEN_KEY, String(Date.now() / 1000));
     setUnread(false);
   };
 
-  // Whose alerts is this browser showing? Remembered per device.
+  // Poll for the signed-in account's trigger events (the bell lives in the nav,
+  // so this runs on every page).
   useEffect(() => {
-    setProfile(localStorage.getItem(PROFILE_KEY));
-  }, []);
-
-  const choose = (name: string) => {
-    const clean = name.trim().slice(0, 24);
-    if (!clean) return;
-    // Register server-side right away so the name survives switching even
-    // before any rules are added.
-    api.alertProfileCreate(clean).catch(() => {});
-    localStorage.setItem(PROFILE_KEY, clean);
-    lastNotified.current = Date.now() / 1000 - 60;
-    setState(null);
-    setNewName("");
-    setProfile(clean);
-  };
-
-  const switchProfile = () => {
-    localStorage.removeItem(PROFILE_KEY);
-    setProfile(null);
-    setState(null);
-    setUnread(false);
-    setArmDelete(null);
-    api.alertProfiles().then((r) => setProfiles(r.profiles)).catch(() => {});
-  };
-
-  const removeProfile = async (name: string) => {
-    try {
-      const r = await api.alertProfileDelete(name);
-      setProfiles(r.profiles);
-      setArmDelete(null);
-      if (localStorage.getItem(PROFILE_KEY) === name)
-        localStorage.removeItem(PROFILE_KEY);
-    } catch {
-      setErr("Couldn't delete that profile.");
-    }
-  };
-
-  // Poll for trigger events (works on every page; the bell lives in the nav).
-  useEffect(() => {
-    if (!profile) return;
     let live = true;
     const poll = async () => {
+      if (!getToken()) return; // signed out — the AuthGate is up anyway
       try {
-        const { events, now } = await api.alertEvents(profile, lastNotified.current);
+        const { events, now } = await api.alertEvents(lastNotified.current);
         if (!live) return;
         if (events.length > 0) {
           lastNotified.current = now;
-          setUnread(events.some((e) => e.ts > seenTs(profile)));
+          setUnread(events.some((e) => e.ts > seenTs()));
           setToasts((t) => [...t, ...events].slice(-3));
           if (
             typeof Notification !== "undefined" &&
@@ -149,7 +107,7 @@ export default function AlertsBell() {
           );
         }
       } catch {
-        /* backend unreachable — try again next tick */
+        /* backend unreachable or signed out — try again next tick */
       }
     };
     poll();
@@ -158,28 +116,21 @@ export default function AlertsBell() {
       live = false;
       clearInterval(id);
     };
-  }, [profile]);
+  }, []);
 
-  // Panel open: load the chosen profile's state, or the picker's name list.
+  // Load full state when the panel opens; mark events seen.
   useEffect(() => {
     if (!open) return;
     setErr(null);
-    if (!profile) {
-      api
-        .alertProfiles()
-        .then((r) => setProfiles(r.profiles))
-        .catch(() => setErr("Couldn't reach the alerts server."));
-      return;
-    }
     api
-      .alerts(profile)
+      .alerts()
       .then((s) => {
         setState(s);
-        if (s.events[0] && s.events[0].ts > seenTs(profile)) setUnread(true);
-        markSeen(profile);
+        if (s.events[0] && s.events[0].ts > seenTs()) setUnread(true);
+        markSeen();
       })
       .catch(() => setErr("Couldn't load alerts."));
-  }, [open, profile]);
+  }, [open]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -208,13 +159,13 @@ export default function AlertsBell() {
   }, [q, picked]);
 
   const addRule = async () => {
-    if (!profile || !picked || !threshold) return;
+    if (!picked || !threshold) return;
     const [kind, direction] = cond.split(":");
     const t = parseFloat(threshold);
     if (!(t > 0)) return;
     try {
       setState(
-        await api.alertCreate(profile, {
+        await api.alertCreate({
           symbol: picked.symbol,
           name: picked.name,
           kind,
@@ -233,21 +184,22 @@ export default function AlertsBell() {
   const unit = CONDITIONS.find((c) => c.value === cond)?.unit ?? "%";
   const settings = state?.settings;
 
-  const patchSettings = async (patch: Parameters<typeof api.alertSettings>[1]) => {
-    if (!profile) return;
+  const patchSettings = async (patch: Parameters<typeof api.alertSettings>[0]) => {
     try {
-      setState(await api.alertSettings(profile, patch));
+      setState(await api.alertSettings(patch));
     } catch {
       setErr("Couldn't save settings.");
     }
   };
 
   const runTest = async (channel: "email" | "sms") => {
-    if (!profile) return;
     setTestMsg((m) => ({ ...m, [channel]: "Sending…" }));
     try {
-      const r = await api.alertTest(profile, channel);
-      setTestMsg((m) => ({ ...m, [channel]: r.ok ? "Sent ✓ — check your inbox" : r.error || "Failed" }));
+      const r = await api.alertTest(channel);
+      setTestMsg((m) => ({
+        ...m,
+        [channel]: r.ok ? "Sent ✓ — check your inbox" : r.error || "Failed",
+      }));
     } catch {
       setTestMsg((m) => ({ ...m, [channel]: "Failed to reach the server" }));
     }
@@ -283,101 +235,16 @@ export default function AlertsBell() {
 
       {open && (
         <div className="absolute right-0 z-30 mt-2 max-h-[82vh] w-[min(24rem,calc(100vw-1rem))] overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 shadow-2xl">
-          <header className="flex items-start justify-between gap-2 border-b border-neutral-800 px-4 py-3">
-            <div>
-              <h3 className="text-sm font-semibold">
-                Price alerts
-                {profile && <span className="text-neutral-500"> · {profile}</span>}
-              </h3>
-              <p className="mt-0.5 text-[11px] text-neutral-500">
-                Checked every minute, 24/7 — even with this site closed.
-              </p>
-            </div>
-            {profile && (
-              <button
-                onClick={switchProfile}
-                className="shrink-0 text-[11px] text-neutral-500 transition hover:text-neutral-300"
-              >
-                Switch person
-              </button>
-            )}
+          <header className="border-b border-neutral-800 px-4 py-3">
+            <h3 className="text-sm font-semibold">Price alerts</h3>
+            <p className="mt-0.5 text-[11px] text-neutral-500">
+              Checked every minute, 24/7 — even with this site closed.
+            </p>
           </header>
 
           {err && <p className="px-4 py-2 text-sm text-rose-400">{err}</p>}
 
-          {/* Who is this? — each person gets their own alerts + delivery */}
-          {!profile && (
-            <div className="px-4 py-4">
-              <div className="mb-2 text-xs font-semibold text-neutral-400">
-                Who&apos;s using this?
-              </div>
-              {profiles.length > 0 && (
-                <div className="mb-3 flex flex-wrap gap-1.5">
-                  {profiles.map((p) =>
-                    armDelete === p ? (
-                      <button
-                        key={p}
-                        onClick={() => removeProfile(p)}
-                        className="rounded-full border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-sm text-rose-300 transition hover:bg-rose-500/20"
-                      >
-                        Delete {p}?
-                      </button>
-                    ) : (
-                      <span
-                        key={p}
-                        className="inline-flex items-center overflow-hidden rounded-full border border-neutral-700"
-                      >
-                        <button
-                          onClick={() => choose(p)}
-                          className="px-3 py-1.5 text-sm text-neutral-200 transition hover:bg-neutral-800"
-                        >
-                          {p}
-                        </button>
-                        <button
-                          onClick={() => {
-                            setArmDelete(p);
-                            setTimeout(
-                              () => setArmDelete((a) => (a === p ? null : a)),
-                              3000,
-                            );
-                          }}
-                          aria-label={`Delete ${p}`}
-                          className="border-l border-neutral-800 px-2 py-1.5 text-neutral-500 transition hover:text-rose-400"
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ),
-                  )}
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <input
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && choose(newName)}
-                  placeholder={profiles.length ? "Someone new…" : "Your name…"}
-                  maxLength={24}
-                  className="flex-1 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm placeholder:text-neutral-600 outline-none focus:border-neutral-600"
-                />
-                <button
-                  onClick={() => choose(newName)}
-                  disabled={!newName.trim()}
-                  className="rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 transition hover:bg-white disabled:cursor-default disabled:opacity-40"
-                >
-                  Start
-                </button>
-              </div>
-              <p className="mt-2 text-[11px] leading-snug text-neutral-600">
-                Each person gets their own alerts, email, and phone number.
-                Remembered on this device.
-              </p>
-            </div>
-          )}
-
           {/* New alert */}
-          {profile && (
-          <>
           <div className="border-b border-neutral-800 px-4 py-3">
             <div className="mb-1.5 text-xs font-semibold text-neutral-400">
               New alert
@@ -476,16 +343,11 @@ export default function AlertsBell() {
                     <Toggle
                       on={r.enabled}
                       onChange={async () =>
-                        profile &&
-                        setState(
-                          await api.alertUpdate(profile, r.id, { enabled: !r.enabled }),
-                        )
+                        setState(await api.alertUpdate(r.id, { enabled: !r.enabled }))
                       }
                     />
                     <button
-                      onClick={async () =>
-                        profile && setState(await api.alertDelete(profile, r.id))
-                      }
+                      onClick={async () => setState(await api.alertDelete(r.id))}
                       aria-label={`Delete ${r.symbol} alert`}
                       className="px-1 text-neutral-500 transition hover:text-rose-400"
                     >
@@ -496,8 +358,6 @@ export default function AlertsBell() {
               ))}
             </div>
           </div>
-          </>
-          )}
 
           {/* Recent triggers */}
           {state && state.events.length > 0 && (
@@ -604,7 +464,13 @@ export default function AlertsBell() {
                     >
                       {state.sms_carriers.map((c) => (
                         <option key={c} value={c}>
-                          {c === "tmobile" ? "T-Mobile" : c === "att" ? "AT&T" : c === "uscellular" ? "US Cellular" : c[0].toUpperCase() + c.slice(1)}
+                          {c === "tmobile"
+                            ? "T-Mobile"
+                            : c === "att"
+                              ? "AT&T"
+                              : c === "uscellular"
+                                ? "US Cellular"
+                                : c[0].toUpperCase() + c.slice(1)}
                         </option>
                       ))}
                     </select>

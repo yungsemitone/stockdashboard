@@ -21,8 +21,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Stock Scraper API", version="0.1.0", lifespan=lifespan)
 
-# Paths that must stay reachable without the family password.
-AUTH_EXEMPT = {"/api/auth/login", "/api/auth/status", "/api/health"}
+# Paths that must stay reachable before signing in.
+AUTH_EXEMPT = {
+    "/api/auth/login",
+    "/api/auth/signup",
+    "/api/auth/status",
+    "/api/health",
+}
 
 
 # Registered BEFORE CORSMiddleware below, so CORS wraps auth and 401 responses

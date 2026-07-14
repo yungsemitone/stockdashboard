@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
+import os
 import threading
 import time
 import uuid
@@ -58,14 +58,6 @@ DEFAULT_SETTINGS = {
 
 MAX_RULES = 50
 MAX_EVENTS = 100
-MAX_PROFILES = 8
-
-# Profile names are shown in the UI and used as storage keys — keep them tame.
-_NAME_RE = re.compile(r"^[A-Za-z0-9 _-]{1,24}$")
-
-
-def valid_name(name: str) -> bool:
-    return bool(_NAME_RE.match(name or ""))
 
 
 # --- storage ----------------------------------------------------------------
@@ -84,74 +76,88 @@ def _clean_profile(p: dict) -> dict:
 
 
 def _read() -> dict:
-    """Load {"profiles": {name: {rules, settings, events}}}, migrating the
-    original single-user format to a profile for the app's owner."""
+    """Load {"users": {user_id: {...}}, "legacy_profiles": {name: {...}}}.
+
+    legacy_profiles holds the pre-accounts named profiles; each gets adopted by
+    the account whose username matches (claim_legacy_profile), and keeps firing
+    until claimed so nobody misses alerts mid-migration. Older formats migrate
+    automatically on read.
+    """
     try:
         data = json.loads(_PATH.read_text())
     except Exception:
-        return {"profiles": {}}
+        return {"users": {}, "legacy_profiles": {}}
+    if isinstance(data, dict) and "users" in data:
+        return {
+            "users": {
+                str(uid): _clean_profile(p)
+                for uid, p in (data.get("users") or {}).items()
+                if isinstance(p, dict)
+            },
+            "legacy_profiles": {
+                str(name): _clean_profile(p)
+                for name, p in (data.get("legacy_profiles") or {}).items()
+                if isinstance(p, dict)
+            },
+        }
     if isinstance(data, dict) and isinstance(data.get("profiles"), dict):
         return {
-            "profiles": {
+            "users": {},
+            "legacy_profiles": {
                 str(name): _clean_profile(p)
                 for name, p in data["profiles"].items()
                 if isinstance(p, dict)
-            }
+            },
         }
-    if isinstance(data, dict) and "rules" in data:  # pre-profile layout
-        return {"profiles": {"Aden": _clean_profile(data)}}
-    return {"profiles": {}}
+    if isinstance(data, dict) and "rules" in data:  # original single-user layout
+        return {"users": {}, "legacy_profiles": {"Aden": _clean_profile(data)}}
+    return {"users": {}, "legacy_profiles": {}}
 
 
 def _write(data: dict) -> None:
     try:
         _PATH.parent.mkdir(parents=True, exist_ok=True)
-        _PATH.write_text(json.dumps(data, indent=2))
+        tmp = _PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        os.replace(tmp, _PATH)
     except Exception:
         log.warning("couldn't persist alerts.json", exc_info=True)
 
 
-def _get_or_create(data: dict, profile: str) -> dict:
-    profs = data["profiles"]
-    if profile not in profs:
-        if len(profs) >= MAX_PROFILES:
-            raise ValueError(f"Profile limit reached ({MAX_PROFILES})")
-        profs[profile] = _fresh_profile()
-    return profs[profile]
+def _get_or_create(data: dict, user_id: str) -> dict:
+    if user_id not in data["users"]:
+        data["users"][user_id] = _fresh_profile()
+    return data["users"][user_id]
 
 
 # --- public state / CRUD -----------------------------------------------------
 
 
-def list_profiles() -> list[str]:
-    with _lock:
-        return sorted(_read()["profiles"])
-
-
-def create_profile(name: str) -> list[str]:
-    """Register a profile immediately so the name survives switching even
-    before its first rule or setting is saved."""
+def claim_legacy_profile(username: str, user_id: str, email: str) -> None:
+    """Adopt the pre-accounts profile whose name matches this username (rules,
+    delivery settings, history). No match = a fresh setup with the account's
+    email prefilled as the alert destination."""
     with _lock:
         data = _read()
-        _get_or_create(data, name)
+        if user_id in data["users"]:
+            return
+        match = next(
+            (n for n in data["legacy_profiles"] if n.lower() == username.lower()),
+            None,
+        )
+        if match:
+            data["users"][user_id] = data["legacy_profiles"].pop(match)
+        else:
+            fresh = _fresh_profile()
+            fresh["settings"]["email_to"] = email
+            data["users"][user_id] = fresh
         _write(data)
-        return sorted(data["profiles"])
 
 
-def delete_profile(name: str) -> list[str]:
-    """Remove a profile and everything in it (rules, settings, history)."""
+def get_state(user_id: str) -> dict:
     with _lock:
-        data = _read()
-        data["profiles"].pop(name, None)
-        _write(data)
-        return sorted(data["profiles"])
-
-
-def get_state(profile: str) -> dict:
-    with _lock:
-        p = _read()["profiles"].get(profile) or _fresh_profile()
+        p = _read()["users"].get(user_id) or _fresh_profile()
     return {
-        "profile": profile,
         "rules": p["rules"],
         "settings": p["settings"],
         "events": list(reversed(p["events"][-25:])),  # newest first
@@ -161,7 +167,7 @@ def get_state(profile: str) -> dict:
 
 
 def create_rule(
-    profile: str,
+    user_id: str,
     symbol: str,
     name: str | None,
     kind: str,
@@ -183,16 +189,16 @@ def create_rule(
     }
     with _lock:
         data = _read()
-        p = _get_or_create(data, profile)
+        p = _get_or_create(data, user_id)
         if len(p["rules"]) >= MAX_RULES:
             raise ValueError(f"Alert limit reached ({MAX_RULES})")
         p["rules"].append(rule)
         _write(data)
-    return get_state(profile)
+    return get_state(user_id)
 
 
 def update_rule(
-    profile: str,
+    user_id: str,
     rule_id: str,
     enabled: bool | None = None,
     threshold: float | None = None,
@@ -200,7 +206,7 @@ def update_rule(
 ) -> dict | None:
     with _lock:
         data = _read()
-        p = data["profiles"].get(profile)
+        p = data["users"].get(user_id)
         rule = next((r for r in (p or {}).get("rules", []) if r["id"] == rule_id), None)
         if rule is None:
             return None
@@ -213,23 +219,23 @@ def update_rule(
         if direction in DIRECTIONS and rule["kind"] == "move":
             rule["direction"] = direction
         _write(data)
-    return get_state(profile)
+    return get_state(user_id)
 
 
-def delete_rule(profile: str, rule_id: str) -> dict:
+def delete_rule(user_id: str, rule_id: str) -> dict:
     with _lock:
         data = _read()
-        p = data["profiles"].get(profile)
+        p = data["users"].get(user_id)
         if p:
             p["rules"] = [r for r in p["rules"] if r["id"] != rule_id]
             _write(data)
-    return get_state(profile)
+    return get_state(user_id)
 
 
-def update_settings(profile: str, patch: dict) -> dict:
+def update_settings(user_id: str, patch: dict) -> dict:
     with _lock:
         data = _read()
-        cfg = _get_or_create(data, profile)["settings"]
+        cfg = _get_or_create(data, user_id)["settings"]
         for key in ("email_enabled", "sms_enabled"):
             if key in patch:
                 cfg[key] = bool(patch[key])
@@ -245,12 +251,12 @@ def update_settings(profile: str, patch: dict) -> dict:
             except (TypeError, ValueError):
                 pass
         _write(data)
-    return get_state(profile)
+    return get_state(user_id)
 
 
-def events_since(profile: str, ts: float) -> list[dict]:
+def events_since(user_id: str, ts: float) -> list[dict]:
     with _lock:
-        p = _read()["profiles"].get(profile)
+        p = _read()["users"].get(user_id)
     if not p:
         return []
     return [e for e in p["events"] if e["ts"] > ts][-20:]
@@ -303,15 +309,21 @@ def _message(rule: dict, quote: dict) -> str:
     return f"{name} ({rule['symbol']}) is at {px} — {word} your {rule['threshold']:,.2f} target"
 
 
+def _everyone(data: dict) -> list[dict]:
+    """Every alert setup that should be evaluated: accounts plus any legacy
+    profiles nobody has claimed yet (those keep firing until adopted)."""
+    return list(data["users"].values()) + list(data["legacy_profiles"].values())
+
+
 def check_all() -> int:
-    """Evaluate every profile's enabled rules; record + send fires per person.
+    """Evaluate every account's enabled rules; record + send fires per person.
     One shared quote snapshot covers everyone. Returns the total fired."""
     with _lock:
         snapshot = _read()
     symbols = sorted(
         {
             r["symbol"]
-            for p in snapshot["profiles"].values()
+            for p in _everyone(snapshot)
             for r in p["rules"]
             if r.get("enabled")
         }
@@ -322,11 +334,11 @@ def check_all() -> int:
     quotes = market.snapshot_quotes(symbols)  # network — outside the lock
 
     now = time.time()
-    batches: list[tuple[list[dict], dict]] = []  # (fired events, that profile's settings)
+    batches: list[tuple[list[dict], dict]] = []  # (fired events, that person's settings)
     changed = False
     with _lock:
         data = _read()  # re-read so concurrent edits aren't clobbered
-        for prof in data["profiles"].values():
+        for prof in _everyone(data):
             cooldown = max(0, int(prof["settings"].get("cooldown_min", 60))) * 60
             fired: list[dict] = []
             for rule in prof["rules"]:
@@ -433,14 +445,14 @@ def _notify(events: list[dict], cfg: dict) -> None:
                 log.warning("alert text failed: %s", e)
 
 
-def send_test(profile: str, channel: str) -> dict:
+def send_test(user_id: str, channel: str) -> dict:
     """Send a test message so delivery can be verified from the UI."""
     if not smtp_configured():
         return {
             "ok": False,
             "error": "Email isn't set up on the server yet (SMTP_HOST / SMTP_USER / SMTP_PASS secrets).",
         }
-    cfg = get_state(profile)["settings"]
+    cfg = get_state(user_id)["settings"]
     try:
         if channel == "sms":
             addr = _sms_address(cfg.get("sms_number", ""), cfg.get("sms_carrier", ""))
