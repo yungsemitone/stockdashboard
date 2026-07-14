@@ -25,6 +25,8 @@ app = FastAPI(title="Stock Scraper API", version="0.1.0", lifespan=lifespan)
 AUTH_EXEMPT = {
     "/api/auth/login",
     "/api/auth/signup",
+    "/api/auth/forgot",
+    "/api/auth/reset",
     "/api/auth/status",
     "/api/health",
 }

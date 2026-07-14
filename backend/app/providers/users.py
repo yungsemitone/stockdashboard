@@ -161,6 +161,83 @@ def public_by_id(user_id: str) -> dict | None:
     return _public(user) if user else None
 
 
+def public_by_username(username: str) -> dict | None:
+    name = username.strip().lower()
+    with _lock:
+        data = _read()
+    user = next((u for u in data["users"] if u["username"].lower() == name), None)
+    return _public(user) if user else None
+
+
+# --- password reset -----------------------------------------------------------
+
+
+def start_reset(identifier: str) -> tuple[dict, str] | None:
+    """If the account exists, set a short-lived 6-digit reset code and return
+    (public user, code) for emailing; None otherwise (caller stays silent so
+    the form can't probe for accounts)."""
+    ident = identifier.strip().lower()
+    with _lock:
+        data = _read()
+        user = next(
+            (
+                u
+                for u in data["users"]
+                if u["email"] == ident or u["username"].lower() == ident
+            ),
+            None,
+        )
+        if user is None:
+            return None
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        user["reset"] = {
+            "code_hash": hashlib.sha256(code.encode()).hexdigest(),
+            "expires": time.time() + 15 * 60,
+            "attempts": 0,
+        }
+        _write(data)
+    return _public(user), code
+
+
+def finish_reset(identifier: str, code: str, new_password: str) -> tuple[dict, str] | None:
+    """Verify the emailed code and set the new password. Old sessions are
+    revoked; returns (public user, fresh session token) or None."""
+    if len(new_password) < 8:
+        raise ValueError("Password needs at least 8 characters.")
+    ident = identifier.strip().lower()
+    with _lock:
+        data = _read()
+        user = next(
+            (
+                u
+                for u in data["users"]
+                if u["email"] == ident or u["username"].lower() == ident
+            ),
+            None,
+        )
+        r = (user or {}).get("reset")
+        if not user or not r:
+            return None
+        if r.get("expires", 0) < time.time() or r.get("attempts", 0) >= 5:
+            user.pop("reset", None)
+            _write(data)
+            return None
+        supplied = hashlib.sha256(code.strip().encode()).hexdigest()
+        if not hmac.compare_digest(supplied, r.get("code_hash", "")):
+            r["attempts"] = r.get("attempts", 0) + 1
+            _write(data)
+            return None
+        user.pop("reset", None)
+        user["pw_hash"] = _hash_password(new_password)
+        # Sign out everywhere — old sessions die with the old password.
+        data["sessions"] = {
+            t: s for t, s in data["sessions"].items() if s.get("user_id") != user["id"]
+        }
+        token = _new_session(data, user["id"])
+        _write(data)
+    return _public(user), token
+
+
 def primary_user_id() -> str | None:
     """The first account ever created — it inherits the pre-accounts shared
     data, and it's what the Morning Desk's service token reads as."""

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from . import universe
-from .providers import alerts, analyst, market
+from .providers import alerts, analyst, digest, market
 
 log = logging.getLogger("scheduler")
 
@@ -54,6 +54,15 @@ def _check_alerts() -> None:
         log.warning("alerts check failed: %s", e)
 
 
+def _check_digests() -> None:
+    try:
+        sent = digest.check_and_send()
+        if sent:
+            log.info("morning digests sent: %d", sent)
+    except Exception as e:
+        log.warning("digest check failed: %s", e)
+
+
 def start() -> None:
     global _scheduler
     if _scheduler is not None:
@@ -76,6 +85,13 @@ def start() -> None:
         seconds=ALERTS_SECONDS,
         id="alerts",
         next_run_time=datetime.now() + timedelta(seconds=30),
+    )
+    _scheduler.add_job(
+        _check_digests,
+        "interval",
+        seconds=60,
+        id="digests",
+        next_run_time=datetime.now() + timedelta(seconds=45),
     )
     _scheduler.start()
     log.info("scheduler started (every %ss)", REFRESH_SECONDS)

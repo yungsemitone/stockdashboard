@@ -235,6 +235,9 @@ export type AlertSettings = {
   sms_number: string;
   sms_carrier: string;
   cooldown_min: number;
+  digest_enabled: boolean;
+  digest_time: string; // "HH:MM" ET
+  digest_last: string;
 };
 
 export type AlertsState = {
@@ -360,6 +363,15 @@ export const api = {
     ),
   authLogout: () => send<{ ok: boolean }>("POST", "/api/auth/logout"),
   authMe: () => get<{ user: User }>("/api/auth/me"),
+  authForgot: (identifier: string) =>
+    send<{ ok: boolean; error?: string }>("POST", "/api/auth/forgot", { identifier }),
+  authReset: (identifier: string, code: string, password: string) =>
+    send<{ ok: boolean; error?: string; token?: string; user?: User }>(
+      "POST",
+      "/api/auth/reset",
+      { identifier, code, password },
+    ),
+  digestSend: () => send<{ ok: boolean; error?: string }>("POST", "/api/digest/send"),
   alerts: () => get<AlertsState>("/api/alerts"),
   alertCreate: (rule: {
     symbol: string;

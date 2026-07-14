@@ -54,6 +54,10 @@ DEFAULT_SETTINGS = {
     "sms_number": "",
     "sms_carrier": "verizon",
     "cooldown_min": 60,
+    # Morning digest (weekday email brief; see providers/digest.py).
+    "digest_enabled": False,
+    "digest_time": "07:30",  # ET
+    "digest_last": "",  # date last sent, YYYY-MM-DD (internal)
 }
 
 MAX_RULES = 50
@@ -131,6 +135,37 @@ def _get_or_create(data: dict, user_id: str) -> dict:
 
 
 # --- public state / CRUD -----------------------------------------------------
+
+
+def adopt_legacy_profile(legacy_name: str, user_id: str) -> dict:
+    """Merge a named pre-accounts profile into an account (admin/service
+    action, for when the signup username didn't match). Rules and history
+    combine; the legacy delivery settings win — they were the person's real,
+    working config."""
+    with _lock:
+        data = _read()
+        match = next(
+            (n for n in data["legacy_profiles"] if n.lower() == legacy_name.lower()),
+            None,
+        )
+        if match is None:
+            return {"ok": False, "error": f"No legacy profile named {legacy_name!r}."}
+        legacy = data["legacy_profiles"].pop(match)
+        target = _get_or_create(data, user_id)
+        have = {r["id"] for r in target["rules"]}
+        target["rules"] += [r for r in legacy["rules"] if r["id"] not in have]
+        target["events"] = sorted(
+            target["events"] + legacy["events"], key=lambda e: e["ts"]
+        )[-MAX_EVENTS:]
+        target["settings"] = {**DEFAULT_SETTINGS, **legacy["settings"]}
+        _write(data)
+        return {
+            "ok": True,
+            "merged": match,
+            "rules": len(target["rules"]),
+            "events": len(target["events"]),
+            "email_to": target["settings"]["email_to"],
+        }
 
 
 def claim_legacy_profile(username: str, user_id: str, email: str) -> None:
@@ -250,8 +285,31 @@ def update_settings(user_id: str, patch: dict) -> dict:
                 cfg["cooldown_min"] = min(1440, max(0, int(patch["cooldown_min"])))
             except (TypeError, ValueError):
                 pass
+        if "digest_enabled" in patch:
+            cfg["digest_enabled"] = bool(patch["digest_enabled"])
+        if "digest_time" in patch:
+            t = str(patch["digest_time"]).strip()
+            if len(t) == 5 and t[2] == ":" and t.replace(":", "").isdigit():
+                hh, mm = int(t[:2]), int(t[3:])
+                if 0 <= hh < 24 and 0 <= mm < 60:
+                    cfg["digest_time"] = t
         _write(data)
     return get_state(user_id)
+
+
+def user_ids() -> list[str]:
+    """Accounts with an alerts/digest block (for the digest scheduler)."""
+    with _lock:
+        return list(_read()["users"].keys())
+
+
+def mark_digest_sent(user_id: str, date_str: str) -> None:
+    with _lock:
+        data = _read()
+        p = data["users"].get(user_id)
+        if p:
+            p["settings"]["digest_last"] = date_str
+            _write(data)
 
 
 def events_since(user_id: str, ts: float) -> list[dict]:
@@ -381,6 +439,12 @@ def check_all() -> int:
 
 def smtp_configured() -> bool:
     return bool(settings.smtp_host and settings.smtp_user and settings.smtp_pass)
+
+
+def send_email(to: list[str], subject: str, body: str) -> None:
+    """Public helper for other features (password resets, the digest) that
+    ride the same SMTP pipe as alerts."""
+    _send_email(to, subject, body)
 
 
 def _send_email(to: list[str], subject: str, body: str) -> None:

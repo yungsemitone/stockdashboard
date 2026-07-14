@@ -3,7 +3,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..providers import alerts
+from ..providers import alerts, digest, users
 from . import auth
 
 router = APIRouter()
@@ -30,6 +30,8 @@ class SettingsPatch(BaseModel):
     sms_number: str | None = None
     sms_carrier: str | None = None
     cooldown_min: int | None = None
+    digest_enabled: bool | None = None
+    digest_time: str | None = None
 
 
 class TestIn(BaseModel):
@@ -87,6 +89,30 @@ def run_check(request: Request):
     """Evaluate all rules right now (the scheduler also does this every minute)."""
     auth.current_account(request)  # any valid credential
     return {"fired": alerts.check_all()}
+
+
+class AdoptIn(BaseModel):
+    legacy_name: str
+    username: str
+
+
+@router.post("/alerts/adopt")
+def adopt_legacy(body: AdoptIn, request: Request):
+    """Admin (service-token) action: merge a pre-accounts profile into an
+    account when the signup username didn't match it."""
+    if not auth.is_service(request):
+        raise HTTPException(403, "service token required")
+    account = users.public_by_username(body.username)
+    if account is None:
+        raise HTTPException(404, f"no account named {body.username!r}")
+    return alerts.adopt_legacy_profile(body.legacy_name, account["id"])
+
+
+@router.post("/digest/send")
+def send_digest_now(request: Request):
+    """Send the caller's morning digest immediately (preview / test)."""
+    user = auth.require_account(request)
+    return digest.send_to(user["id"])
 
 
 @router.put("/alerts/{rule_id}")

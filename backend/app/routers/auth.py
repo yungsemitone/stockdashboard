@@ -122,6 +122,53 @@ def login(body: LoginIn, request: Request):
     return {"ok": True, "token": token, "user": user}
 
 
+class ForgotIn(BaseModel):
+    identifier: str  # email or username
+
+
+class ResetIn(BaseModel):
+    identifier: str
+    code: str
+    password: str
+
+
+@router.post("/auth/forgot")
+def forgot(body: ForgotIn, request: Request):
+    """Email a 6-digit reset code (15-minute life). Always claims success so
+    the form can't be used to probe which accounts exist."""
+    if not _rate_ok(request):
+        raise HTTPException(429, "Too many attempts — give it a few minutes.")
+    if not alerts.smtp_configured():
+        return {"ok": False, "error": "Email isn't set up on the server."}
+    got = users.start_reset(body.identifier)
+    if got:
+        user, code = got
+        try:
+            alerts.send_email(
+                [user["email"]],
+                "Markets password reset",
+                f"Hi {user['username']} — your reset code is {code}. "
+                "It expires in 15 minutes.\n\nIf you didn't ask for this, ignore it.",
+            )
+        except Exception:
+            return {"ok": False, "error": "Couldn't send the email — try again."}
+    return {"ok": True}
+
+
+@router.post("/auth/reset")
+def reset(body: ResetIn, request: Request):
+    if not _rate_ok(request):
+        raise HTTPException(429, "Too many attempts — give it a few minutes.")
+    try:
+        got = users.finish_reset(body.identifier, body.code, body.password)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    if got is None:
+        return {"ok": False, "error": "That code didn't work — request a new one."}
+    user, token = got
+    return {"ok": True, "token": token, "user": user}
+
+
 @router.post("/auth/logout")
 def logout(request: Request):
     users.logout(_bearer(request))
