@@ -10,7 +10,7 @@ import WatchlistButton from "@/components/WatchlistButton";
 import NewsList from "@/components/NewsList";
 import AnalystConsensus from "@/components/AnalystConsensus";
 import LivePrice from "@/components/LivePrice";
-import { fmtPrice, fmtPct, fmtCompact, changeColor } from "@/lib/format";
+import { fmtPrice, fmtPct, fmtCompact, fmtEventDate, changeColor } from "@/lib/format";
 
 const RANGES = ["1d", "5d", "1mo", "6mo", "1y", "5y", "max"] as const;
 
@@ -56,6 +56,12 @@ export default function AssetPage({
 
   const live = usePriceStream(useMemo(() => [symbol], [symbol]));
   const livePrice = live[symbol];
+
+  const { data: earnings } = usePoll<{ symbol: string; date: string | null }>(
+    () => api.earningsFor(symbol),
+    6 * 60 * 60 * 1000,
+    [symbol],
+  );
 
   const candles = hist?.candles ?? [];
   const level = quote?.is_level ?? false;
@@ -131,6 +137,15 @@ export default function AssetPage({
         ["Market cap", quote.market_cap != null ? fmtCompact(quote.market_cap) : "—"],
       ]
     : [];
+  if (quote && earnings?.date) {
+    const days = Math.round(
+      (new Date(earnings.date + "T12:00:00").getTime() - Date.now()) / 86400000,
+    );
+    stats.push([
+      "Next earnings",
+      `${fmtEventDate(earnings.date)}${days >= 0 ? ` · in ${days}d` : ""}`,
+    ]);
+  }
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">

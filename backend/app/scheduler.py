@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from . import universe
-from .providers import alerts, analyst, digest, market
+from .providers import alerts, analyst, digest, earnings, market, watchlist
 
 log = logging.getLogger("scheduler")
 
@@ -63,6 +63,27 @@ def _check_digests() -> None:
         log.warning("digest check failed: %s", e)
 
 
+def _check_earnings() -> None:
+    try:
+        sent = earnings.check_and_notify()
+        if sent:
+            log.info("earnings heads-ups sent: %d", sent)
+    except Exception as e:
+        log.warning("earnings check failed: %s", e)
+
+
+def _warm_earnings() -> None:
+    try:
+        symbols = set(universe.UNIVERSE.get("stocks", []))
+        for uid in alerts.user_ids():
+            for l in watchlist.get_all(uid):
+                symbols.update(l["symbols"])
+        earnings.warm(sorted(symbols)[:60])
+        log.info("earnings dates warmed")
+    except Exception as e:
+        log.warning("earnings warm failed: %s", e)
+
+
 def start() -> None:
     global _scheduler
     if _scheduler is not None:
@@ -92,6 +113,20 @@ def start() -> None:
         seconds=60,
         id="digests",
         next_run_time=datetime.now() + timedelta(seconds=45),
+    )
+    _scheduler.add_job(
+        _check_earnings,
+        "interval",
+        seconds=600,
+        id="earnings",
+        next_run_time=datetime.now() + timedelta(seconds=90),
+    )
+    _scheduler.add_job(
+        _warm_earnings,
+        "interval",
+        seconds=3600,
+        id="warm_earnings",
+        next_run_time=datetime.now() + timedelta(seconds=120),
     )
     _scheduler.start()
     log.info("scheduler started (every %ss)", REFRESH_SECONDS)

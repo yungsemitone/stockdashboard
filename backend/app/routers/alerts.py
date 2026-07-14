@@ -34,6 +34,7 @@ class SettingsPatch(BaseModel):
     digest_time: str | None = None
     evening_enabled: bool | None = None
     evening_time: str | None = None
+    earnings_alerts: bool | None = None
 
 
 class TestIn(BaseModel):

@@ -235,6 +235,7 @@ export type AlertSettings = {
   sms_number: string;
   sms_carrier: string;
   cooldown_min: number;
+  earnings_alerts: boolean;
   digest_enabled: boolean;
   digest_time: string; // "HH:MM" ET
   digest_last: string;
@@ -249,6 +250,13 @@ export type AlertsState = {
   events: AlertEvent[];
   email_configured: boolean;
   sms_carriers: string[];
+};
+
+export type EarningsItem = {
+  symbol: string;
+  name: string;
+  date: string;
+  days_away: number;
 };
 
 export type ConvertResult = {
@@ -376,6 +384,10 @@ export const api = {
     ),
   digestSend: (kind: "morning" | "evening") =>
     send<{ ok: boolean; error?: string }>("POST", "/api/digest/send", { kind }),
+  earningsFor: (symbol: string) =>
+    get<{ symbol: string; date: string | null }>(`/api/earnings/${sym(symbol)}`),
+  earningsUpcoming: () =>
+    get<{ upcoming: EarningsItem[] }>("/api/earnings/upcoming"),
   alerts: () => get<AlertsState>("/api/alerts"),
   alertCreate: (rule: {
     symbol: string;

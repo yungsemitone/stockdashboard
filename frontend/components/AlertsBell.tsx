@@ -504,6 +504,22 @@ export default function AlertsBell() {
                 </div>
               )}
 
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <span className="text-sm text-neutral-300">Earnings heads-up</span>
+                <Toggle
+                  on={settings.earnings_alerts}
+                  onChange={() =>
+                    patchSettings({ earnings_alerts: !settings.earnings_alerts })
+                  }
+                />
+              </div>
+              {settings.earnings_alerts && (
+                <p className="mt-1.5 text-[11px] leading-snug text-neutral-600">
+                  A morning notice when a watchlist name reports today or
+                  tomorrow — delivered like your other alerts.
+                </p>
+              )}
+
               {(
                 [
                   {

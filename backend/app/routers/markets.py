@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from .. import universe
@@ -158,6 +158,28 @@ def convert(base: str, quote: str, amount: float = 1.0):
 def quote(symbol: str, indices: str = "futures"):
     universe.set_indices_mode(indices)
     return market.get_quote(symbol)
+
+
+@router.get("/earnings/upcoming")
+def earnings_upcoming(request: Request, days: int = 14):
+    """Watchlist names reporting soon, for the caller's account."""
+    from ..providers import earnings, watchlist
+    from . import auth
+
+    user = auth.current_account(request)
+    symbols = sorted({s for l in watchlist.get_all(user["id"]) for s in l["symbols"]})[:25]
+    out = earnings.upcoming_for(symbols, days=min(days, 30))
+    for e in out:
+        e["name"] = universe.name_for(e["symbol"])
+    return {"upcoming": out}
+
+
+@router.get("/earnings/{symbol:path}")
+def earnings_for(symbol: str):
+    """The symbol's next earnings date (null when unknown / not an equity)."""
+    from ..providers import earnings
+
+    return {"symbol": symbol, "date": earnings.next_earnings(symbol)}
 
 
 @router.get("/analysis/{symbol:path}")

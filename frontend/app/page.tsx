@@ -13,6 +13,7 @@ import MoversNews from "@/components/MoversNews";
 import ClassSection from "@/components/ClassSection";
 import NewsList from "@/components/NewsList";
 import EconCalendar from "@/components/EconCalendar";
+import EarningsStrip from "@/components/EarningsStrip";
 
 export default function Home() {
   const [scope, setScope] = useState<Scope>("day");
@@ -119,6 +120,7 @@ export default function Home() {
 
         <div className="grid gap-5 self-start">
           <NewsList title="Market News" limit={6} />
+          <EarningsStrip />
           <EconCalendar limit={5} />
         </div>
       </div>

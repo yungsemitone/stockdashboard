@@ -61,6 +61,9 @@ DEFAULT_SETTINGS = {
     "evening_enabled": False,
     "evening_time": "16:30",  # ET, after the close
     "evening_last": "",
+    # Day-before heads-up when a watchlist name reports (providers/earnings.py).
+    "earnings_alerts": False,
+    "earnings_notified": {},  # "SYM:date" -> ts (internal, pruned)
 }
 
 MAX_RULES = 50
@@ -288,7 +291,7 @@ def update_settings(user_id: str, patch: dict) -> dict:
                 cfg["cooldown_min"] = min(1440, max(0, int(patch["cooldown_min"])))
             except (TypeError, ValueError):
                 pass
-        for flag in ("digest_enabled", "evening_enabled"):
+        for flag in ("digest_enabled", "evening_enabled", "earnings_alerts"):
             if flag in patch:
                 cfg[flag] = bool(patch[flag])
         for key in ("digest_time", "evening_time"):
@@ -306,6 +309,44 @@ def user_ids() -> list[str]:
     """Accounts with an alerts/digest block (for the digest scheduler)."""
     with _lock:
         return list(_read()["users"].keys())
+
+
+def earnings_already_notified(user_id: str, key: str) -> bool:
+    with _lock:
+        p = _read()["users"].get(user_id)
+    return bool(p and key in p["settings"].get("earnings_notified", {}))
+
+
+def record_earnings_notice(user_id: str, key: str, message: str) -> None:
+    """Log an earnings heads-up as an event (bell/toasts/browser pick it up)
+    and deliver it via the account's email/text settings."""
+    now = time.time()
+    event = {
+        "id": uuid.uuid4().hex[:10],
+        "rule_id": "earnings",
+        "symbol": key.split(":")[0],
+        "name": key.split(":")[0],
+        "kind": "earnings",
+        "threshold": 0,
+        "value": None,
+        "price": None,
+        "message": message,
+        "ts": now,
+    }
+    with _lock:
+        data = _read()
+        p = data["users"].get(user_id)
+        if p is None:
+            return
+        noted = p["settings"].setdefault("earnings_notified", {})
+        noted[key] = now
+        # prune entries older than 30 days
+        for k in [k for k, ts in noted.items() if now - ts > 30 * 86400]:
+            del noted[k]
+        p["events"] = (p["events"] + [event])[-MAX_EVENTS:]
+        cfg = dict(p["settings"])
+        _write(data)
+    _notify([event], cfg, subject=f"Earnings heads-up: {event['symbol']}")
 
 
 def mark_digest_sent(user_id: str, date_str: str, kind: str = "morning") -> None:
@@ -487,10 +528,10 @@ def _sms_address(number: str, carrier: str) -> str | None:
     return f"{digits}@{gateway}" if gateway and len(digits) == 10 else None
 
 
-def _notify(events: list[dict], cfg: dict) -> None:
+def _notify(events: list[dict], cfg: dict, subject: str | None = None) -> None:
     if not smtp_configured():
         return
-    subject = (
+    subject = subject or (
         f"Price alert: {events[0]['symbol']}"
         if len(events) == 1
         else f"{len(events)} price alerts"
