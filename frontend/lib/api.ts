@@ -46,15 +46,28 @@ export type Macro = {
 };
 
 export type Candle = {
-  time: string;
+  time: string | number; // ISO date for daily bars, unix seconds for intraday
   open: number | null;
   high: number | null;
   low: number | null;
   close: number | null;
   volume: number | null;
+  session?: "pre" | "regular" | "post"; // tagged on the 1d equity range
 };
 
-export type History = { symbol: string; range: string; candles: Candle[] };
+export type SessionBounds = {
+  start: number; // 4:00 ET
+  open: number; // 9:30 ET
+  close: number; // 16:00 ET
+  end: number; // 20:00 ET
+};
+
+export type History = {
+  symbol: string;
+  range: string;
+  candles: Candle[];
+  bounds?: SessionBounds | null;
+};
 
 export type QuoteDetail = {
   symbol: string;

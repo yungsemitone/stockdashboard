@@ -177,4 +177,4 @@ def history(symbol: str, range: str = "6mo", indices: str = "futures"):
             400, f"range must be one of: {', '.join(market.RANGE_MAP)}"
         )
     universe.set_indices_mode(indices)
-    return {"symbol": symbol, "range": range, "candles": market.get_history(symbol, range)}
+    return {"symbol": symbol, "range": range, **market.get_history(symbol, range)}

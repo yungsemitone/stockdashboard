@@ -100,16 +100,85 @@ RANGE_MAP: dict[str, tuple[str, str]] = {
 }
 
 
-def get_history(symbol: str, rng: str = "6mo") -> list[dict]:
-    """OHLCV candles for one symbol over a time range."""
+_ET = "America/New_York"
+
+
+def _has_sessions(fs: str) -> bool:
+    """US-equity-style symbols trade pre/regular/after sessions; futures, FX,
+    indices, and crypto are continuous (no extended session worth tagging)."""
+    return not (
+        fs.startswith("^")
+        or "=" in fs  # futures (=F) and FX (=X)
+        or fs.endswith("-USD")  # crypto
+        or fs == "DX-Y.NYB"
+    )
+
+
+def _intraday_day(fs: str) -> dict:
+    """The latest trading day's 5-minute bars *including pre/after hours*,
+    each tagged with its session, plus the day's session bounds (unix) so the
+    chart can draw the full 4:00–20:00 ET day even mid-session."""
+    df = yf.Ticker(fs).history(
+        period="2d", interval="5m", prepost=True, auto_adjust=False
+    )
+    if df is None or df.empty:
+        return {"candles": [], "bounds": None}
+    idx = df.index
+    try:
+        idx = idx.tz_convert(_ET)
+    except TypeError:  # naive index — treat as already exchange-local
+        idx = idx.tz_localize(_ET, nonexistent="shift_forward", ambiguous="NaT")
+    day = idx[-1].date()
+    keep = idx.date == day
+    df, idx = df[keep], idx[keep]
+
+    candles: list[dict] = []
+    for ts, (_, row) in zip(idx, df.iterrows()):
+        minutes = ts.hour * 60 + ts.minute
+        session = "pre" if minutes < 570 else "regular" if minutes < 960 else "post"
+        candles.append(
+            {
+                "time": int(ts.timestamp()),
+                "open": _clean(row.get("Open")),
+                "high": _clean(row.get("High")),
+                "low": _clean(row.get("Low")),
+                "close": _clean(row.get("Close")),
+                "volume": _clean(row.get("Volume")),
+                "session": session,
+            }
+        )
+
+    def at(hhmm: str) -> int:
+        return int(pd.Timestamp(f"{day} {hhmm}", tz=_ET).timestamp())
+
+    bounds = {
+        "start": at("04:00"),
+        "open": at("09:30"),
+        "close": at("16:00"),
+        "end": at("20:00"),
+    }
+    return {"candles": candles, "bounds": bounds}
+
+
+def get_history(symbol: str, rng: str = "6mo") -> dict:
+    """Candles for one symbol: {"candles": [...], "bounds": ... | None}.
+
+    For equity-style symbols the 1d range covers the whole latest trading day
+    with pre/after-hours bars tagged by session; other instruments/ranges are
+    plain candles with no bounds.
+    """
     period, interval = RANGE_MAP.get(rng, RANGE_MAP["6mo"])
 
-    def fn() -> list[dict]:
+    def fn() -> dict:
         fs = universe.feed_symbol(symbol)  # futures feed for mapped indices
+        if rng == "1d" and _has_sessions(fs):
+            got = _intraday_day(fs)
+            if got["candles"]:
+                return got
         if twelvedata.enabled():
             td = twelvedata.candles(fs, rng)
             if td:
-                return td
+                return {"candles": td, "bounds": None}
         df = yf.Ticker(fs).history(
             period=period, interval=interval, auto_adjust=False
         )
@@ -126,7 +195,7 @@ def get_history(symbol: str, rng: str = "6mo") -> list[dict]:
                     "volume": _clean(row.get("Volume")),
                 }
             )
-        return out
+        return {"candles": out, "bounds": None}
 
     mode = f":{universe.indices_mode()}" if symbol in universe.INDEX_FEED else ""
     return _cached(f"hist:{symbol}:{rng}{mode}", 60, fn)  # type: ignore[return-value]
@@ -384,7 +453,7 @@ def get_quote(symbol: str) -> dict:
         prev = pick("previous_close", "previousClose")
 
         if last is None or prev is None:
-            hist = get_history(symbol, "5d")
+            hist = get_history(symbol, "5d")["candles"]
             closes = [r["close"] for r in hist if r["close"] is not None]
             if closes:
                 last = last if last is not None else closes[-1]

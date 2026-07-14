@@ -41,7 +41,7 @@ export default function AssetPage({
   // Next gives the route segment still URL-encoded (e.g. "%5EGSPC"); decode it
   // so tickers like ^GSPC / GC=F resolve correctly and never show as raw codes.
   const symbol = decodeURIComponent(rawSymbol);
-  const [range, setRange] = useState<string>("6mo");
+  const [range, setRange] = useState<string>("1d");
 
   const { data: quote, error: qErr } = usePoll<QuoteDetail>(
     () => api.quote(symbol),
@@ -80,6 +80,27 @@ export default function AssetPage({
   const chartRange = hist?.range ?? range;
   const isDay = chartRange === "1d";
   const firstClose = candles.find((c) => c.close != null)?.close ?? null;
+
+  // Pre-market / after-hours change for the 1D view (extended-hours bars are
+  // session-tagged): pre is measured vs the previous close, after-hours vs the
+  // 4pm close.
+  const lastBar = [...candles].reverse().find((c) => c.close != null);
+  const extSession =
+    isDay && (lastBar?.session === "pre" || lastBar?.session === "post")
+      ? lastBar.session
+      : null;
+  const extBase =
+    extSession === "pre"
+      ? prevClose
+      : extSession === "post"
+        ? [...candles].reverse().find((c) => c.session === "regular" && c.close != null)
+            ?.close ?? null
+        : null;
+  const extChange =
+    extSession && extBase != null && lastBar?.close != null
+      ? lastBar.close - extBase
+      : null;
+  const extPct = extChange != null && extBase ? (extChange / extBase) * 100 : null;
   const rangeChange =
     !isDay && firstClose != null && dispPrice != null ? dispPrice - firstClose : null;
   const rangePct =
@@ -156,6 +177,15 @@ export default function AssetPage({
               {periodLabel}
             </span>
           </div>
+          {extChange != null && (
+            <div className="mt-0.5 text-xs tabular-nums text-neutral-500">
+              {extSession === "pre" ? "Pre-market" : "After hours"}:{" "}
+              <span className={changeColor(extPct)}>
+                {extChange >= 0 ? "+" : "-"}
+                {fmtPrice(Math.abs(extChange), priceOpts)} ({fmtPct(extPct)})
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -182,7 +212,7 @@ export default function AssetPage({
           ))}
         </div>
         {candles.length > 0 ? (
-          <PriceChart candles={candles} up={up} />
+          <PriceChart candles={candles} up={up} bounds={hist?.bounds ?? null} />
         ) : (
           <div className="h-[380px] flex items-center justify-center text-neutral-600 text-sm">
             Loading chart…
