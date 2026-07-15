@@ -169,6 +169,7 @@ export type Indicator = {
   as_of: string;
   good_when: "low" | "high" | "neutral";
   implication: string;
+  series?: { t: string; v: number }[]; // ~5y monthly trend of the headline number
 };
 
 export type EconomyRecap = {

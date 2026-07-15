@@ -134,6 +134,34 @@ def _compute(ind: dict, rows: list[tuple[str, float]]) -> dict | None:
     }
 
 
+def _monthly(rows: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """Collapse a series to its last observation per month: [(YYYY-MM, value)]."""
+    out: dict[str, float] = {}
+    for d, v in rows:
+        out[d[:7]] = v
+    return sorted(out.items())
+
+
+def _series(ind: dict, rows: list[tuple[str, float]]) -> list[dict]:
+    """The indicator's transformed history (what the headline number *is*,
+    over time) as compact monthly points for the trend sparkline."""
+    t = ind["transform"]
+    m = _monthly(rows)
+    pts: list[tuple[str, float]] = []
+    if t == "level":
+        pts = m
+    elif t == "mom_diff":
+        pts = [(m[i][0], m[i][1] - m[i - 1][1]) for i in range(1, len(m))]
+    elif t in ("yoy", "yoy_q"):
+        lag = 12 if t == "yoy" else 4  # quarterly series collapse to ~4 pts/yr
+        pts = [
+            (m[i][0], (m[i][1] - m[i - lag][1]) / m[i - lag][1] * 100)
+            for i in range(lag, len(m))
+            if m[i - lag][1]
+        ]
+    return [{"t": k, "v": round(v, 3)} for k, v in pts[-60:]]  # ~5 years
+
+
 def indicators() -> list[dict]:
     global _cache_ts
     if _cache.get("all") and time.time() - _cache_ts < _TTL:
@@ -145,6 +173,7 @@ def indicators() -> list[dict]:
             rows = _fetch_series(ind["id"])
             computed = _compute(ind, rows)
             if computed:
+                computed["series"] = _series(ind, rows)
                 out.append(computed)
         except Exception:
             continue

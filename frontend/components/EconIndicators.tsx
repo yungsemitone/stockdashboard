@@ -4,6 +4,49 @@ import { api, type Indicator } from "@/lib/api";
 import { usePoll } from "@/lib/usePoll";
 import { indicatorColor } from "@/lib/format";
 
+/** Tiny inline 5-year trend of the indicator's headline number. */
+function Sparkline({ pts }: { pts: { t: string; v: number }[] }) {
+  if (pts.length < 2) return null;
+  const w = 220;
+  const h = 34;
+  const pad = 3;
+  const vs = pts.map((p) => p.v);
+  const min = Math.min(...vs);
+  const max = Math.max(...vs);
+  const span = max - min || 1;
+  const x = (idx: number) => pad + (idx / (pts.length - 1)) * (w - 2 * pad);
+  const y = (v: number) => h - pad - ((v - min) / span) * (h - 2 * pad);
+  const path = pts
+    .map((p, idx) => `${idx ? "L" : "M"}${x(idx).toFixed(1)},${y(p.v).toFixed(1)}`)
+    .join(" ");
+  const last = pts[pts.length - 1];
+  const first = pts[0];
+  return (
+    <div className="mt-2" title={`${first.t} → ${last.t}`}>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        className="h-9 w-full"
+        preserveAspectRatio="none"
+        aria-hidden
+      >
+        <path
+          d={path}
+          fill="none"
+          stroke="#d97706"
+          strokeWidth="1.5"
+          opacity="0.75"
+          vectorEffect="non-scaling-stroke"
+        />
+        <circle cx={x(pts.length - 1)} cy={y(last.v)} r="2.5" fill="#f59e0b" />
+      </svg>
+      <div className="flex justify-between text-[10px] text-neutral-600">
+        <span>{first.t}</span>
+        <span>{last.t}</span>
+      </div>
+    </div>
+  );
+}
+
 function fmtValue(i: Indicator): string {
   if (i.unit === "%") return `${i.value.toFixed(2)}%`;
   if (i.unit === "K") return `${i.value >= 0 ? "+" : ""}${i.value.toFixed(0)}K`;
@@ -69,6 +112,7 @@ export default function EconIndicators() {
                 </span>
               )}
             </div>
+            {i.series && <Sparkline pts={i.series} />}
             <p className="mt-2 text-xs text-neutral-500 leading-relaxed">
               {i.implication}
             </p>
