@@ -78,26 +78,16 @@ def upcoming(days_ahead: int = 45) -> list[dict]:
     return events
 
 
-def events_for_date(target: date | None = None,
-                    tiers: tuple = ("high", "medium")) -> list[dict]:
-    """The day's events for the digest. Approximate releases (CPI & co. sit on
-    their *typical* day, which can drift a couple of days) count when they're
-    within 2 days of the target, so a real release can't go missing — they
-    keep their `approximate` flag so callers can mark them ≈. Unlike
-    upcoming(), this can look back at dates already passed."""
+def events_for_date(target: date | None = None) -> list[dict]:
+    """Exactly the day's calendar entries — every release dated `target`, all
+    tiers, matching what the dashboard calendar shows for that day (approximate
+    ones keep their flag so callers can mark them ≈). Empty on weekends and
+    quiet days. Unlike upcoming(), this works for dates already passed."""
     target = target or date.today()
     if target.weekday() >= 5:
         return []
-    window = _generate(target - timedelta(days=2), target + timedelta(days=2))
-    out: list[dict] = []
-    seen: set[str] = set()
-    for e in sorted(window, key=lambda e: abs((date.fromisoformat(e["date"]) - target).days)):
-        if e["importance"] not in tiers or e["name"] in seen:
-            continue
-        delta = abs((date.fromisoformat(e["date"]) - target).days)
-        if (e["approximate"] and delta <= 2) or (not e["approximate"] and delta == 0):
-            seen.add(e["name"])
-            out.append(e)
+    day = target.isoformat()
+    out = [e for e in _generate(target, target) if e["date"] == day]
     rank = {"high": 0, "medium": 1, "low": 2}
     out.sort(key=lambda e: (rank[e["importance"]], e.get("time_et") or "~"))
     return out
