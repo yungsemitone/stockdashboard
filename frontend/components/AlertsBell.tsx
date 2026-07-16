@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   api,
   getToken,
+  type AlertChannels,
   type AlertEvent,
+  type AlertRule,
   type AlertsState,
   type SearchResult,
 } from "@/lib/api";
@@ -28,17 +30,6 @@ function condLabel(r: { kind: string; direction: string; threshold: number }) {
   return `${r.kind} ${r.threshold.toLocaleString()}`;
 }
 
-function ago(ts: number): string {
-  const s = Math.max(0, Date.now() / 1000 - ts);
-  if (s < 90) return "just now";
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return new Date(ts * 1000).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-}
-
 function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
   return (
     <button
@@ -58,8 +49,16 @@ function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
   );
 }
 
+/** Symbols that report earnings (equities/ETFs — not indices, FX, crypto). */
+const reportable = (symbol: string) =>
+  !symbol.startsWith("^") &&
+  !symbol.includes("=") &&
+  !symbol.endsWith("-USD") &&
+  symbol !== "DX-Y.NYB";
+
 export default function AlertsBell() {
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"main" | "rules" | string>("main");
   const [state, setState] = useState<AlertsState | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [toasts, setToasts] = useState<AlertEvent[]>([]);
@@ -93,16 +92,18 @@ export default function AlertsBell() {
         if (events.length > 0) {
           lastNotified.current = now;
           setUnread(events.some((e) => e.ts > seenTs()));
-          setToasts((t) => [...t, ...events].slice(-3));
+          // Per-alert channel choice: browser === false means stay quiet here.
+          const loud = events.filter((e) => e.browser !== false);
+          setToasts((t) => [...t, ...loud].slice(-3));
           if (
             typeof Notification !== "undefined" &&
             Notification.permission === "granted"
           ) {
-            for (const e of events.slice(-3))
-              new Notification(`${e.symbol} price alert`, { body: e.message });
+            for (const e of loud.slice(-3))
+              new Notification(`${e.symbol} alert`, { body: e.message });
           }
           setTimeout(
-            () => live && setToasts((t) => t.filter((x) => !events.includes(x))),
+            () => live && setToasts((t) => t.filter((x) => !loud.includes(x))),
             8000,
           );
         }
@@ -122,11 +123,11 @@ export default function AlertsBell() {
   useEffect(() => {
     if (!open) return;
     setErr(null);
+    setView("main");
     api
       .alerts()
       .then((s) => {
         setState(s);
-        if (s.events[0] && s.events[0].ts > seenTs()) setUnread(true);
         markSeen();
       })
       .catch(() => setErr("Couldn't load alerts."));
@@ -149,8 +150,7 @@ export default function AlertsBell() {
     }
     const id = setTimeout(async () => {
       try {
-        const r = await api.search(query);
-        setResults(r.results.slice(0, 5));
+        setResults((await api.search(query)).results.slice(0, 5));
       } catch {
         setResults([]);
       }
@@ -181,8 +181,22 @@ export default function AlertsBell() {
     }
   };
 
+  const patchRule = async (
+    id: string,
+    patch: Parameters<typeof api.alertUpdate>[1],
+  ) => {
+    try {
+      setState(await api.alertUpdate(id, patch));
+    } catch {
+      setErr("Couldn't save that change.");
+    }
+  };
+
   const unit = CONDITIONS.find((c) => c.value === cond)?.unit ?? "%";
   const settings = state?.settings;
+  const rules = state?.rules ?? [];
+  const detail: AlertRule | undefined =
+    view !== "main" && view !== "rules" ? rules.find((r) => r.id === view) : undefined;
 
   const patchSettings = async (patch: Parameters<typeof api.alertSettings>[0]) => {
     try {
@@ -220,6 +234,8 @@ export default function AlertsBell() {
 
   const notifPerm =
     typeof Notification !== "undefined" ? Notification.permission : "unsupported";
+  const input =
+    "rounded-lg border border-neutral-800 bg-neutral-950 text-sm placeholder:text-neutral-600 outline-none focus:border-neutral-600";
 
   return (
     <div ref={ref} className="relative">
@@ -248,191 +264,166 @@ export default function AlertsBell() {
 
       {open && (
         <div className="absolute right-0 z-30 mt-2 max-h-[82vh] w-[min(24rem,calc(100vw-1rem))] overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 shadow-2xl">
-          <header className="border-b border-neutral-800 px-4 py-3">
-            <h3 className="text-sm font-semibold">Price alerts</h3>
-            <p className="mt-0.5 text-[11px] text-neutral-500">
-              Checked every minute, 24/7 — even with this site closed.
-            </p>
+          <header className="flex items-center justify-between gap-2 border-b border-neutral-800 px-4 py-3">
+            <div>
+              <h3 className="text-sm font-semibold">
+                {view === "main"
+                  ? "Price alerts"
+                  : view === "rules"
+                    ? "Your alerts"
+                    : detail
+                      ? `${detail.symbol} alert`
+                      : "Alert"}
+              </h3>
+              <p className="mt-0.5 text-[11px] text-neutral-500">
+                {view === "main"
+                  ? "Checked every minute, 24/7 — even with this site closed."
+                  : view === "rules"
+                    ? "Tap an alert to choose where it goes."
+                    : detail
+                      ? condLabel(detail)
+                      : ""}
+              </p>
+            </div>
+            {view !== "main" && (
+              <button
+                onClick={() => setView(view === "rules" ? "main" : "rules")}
+                className="shrink-0 text-xs text-neutral-400 transition hover:text-neutral-200"
+              >
+                ← Back
+              </button>
+            )}
           </header>
 
           {err && <p className="px-4 py-2 text-sm text-rose-400">{err}</p>}
 
-          {/* New alert */}
-          <div className="border-b border-neutral-800 px-4 py-3">
-            <div className="mb-1.5 text-xs font-semibold text-neutral-400">
-              New alert
-            </div>
-            <div className="relative">
-              <input
-                value={picked ? `${picked.name} (${picked.symbol})` : q}
-                onChange={(e) => {
-                  setPicked(null);
-                  setQ(e.target.value);
-                }}
-                placeholder="Search a ticker or company…"
-                className="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm placeholder:text-neutral-600 outline-none focus:border-neutral-600"
-              />
-              {results.length > 0 && !picked && (
-                <div className="absolute z-40 mt-1 w-full overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 shadow-xl">
-                  {results.map((r, i) => (
-                    <button
-                      key={`${r.symbol}-${i}`}
-                      onClick={() => {
-                        setPicked({ symbol: r.symbol, name: r.name });
-                        setResults([]);
-                      }}
-                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-neutral-800"
-                    >
-                      <span className="min-w-0 truncate text-sm">{r.name}</span>
-                      <span className="shrink-0 text-xs text-neutral-500">
-                        {r.symbol}
-                      </span>
-                    </button>
-                  ))}
+          {/* ============== MAIN VIEW ============== */}
+          {view === "main" && (
+            <>
+              {/* New alert */}
+              <div className="border-b border-neutral-800 px-4 py-3">
+                <div className="mb-1.5 text-xs font-semibold text-neutral-400">
+                  New alert
                 </div>
-              )}
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <select
-                value={cond}
-                onChange={(e) => setCond(e.target.value)}
-                className="flex-1 rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm outline-none focus:border-neutral-600"
-              >
-                {CONDITIONS.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label} {c.unit === "%" ? "%" : "a price"}
-                  </option>
-                ))}
-              </select>
-              <div className="relative w-24">
-                <input
-                  value={threshold}
-                  onChange={(e) => setThreshold(e.target.value)}
-                  inputMode="decimal"
-                  placeholder={unit === "%" ? "3" : "250"}
-                  className="w-full rounded-lg border border-neutral-800 bg-neutral-950 py-1.5 pl-3 pr-7 text-sm outline-none focus:border-neutral-600"
-                />
-                <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-neutral-500">
-                  {unit}
-                </span>
-              </div>
-              <button
-                onClick={addRule}
-                disabled={!picked || !(parseFloat(threshold) > 0)}
-                className="rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 transition hover:bg-white disabled:cursor-default disabled:opacity-40"
-              >
-                Add
-              </button>
-            </div>
-          </div>
-
-          {/* Rules */}
-          <div className="border-b border-neutral-800 px-4 py-3">
-            <div className="mb-1.5 text-xs font-semibold text-neutral-400">
-              Your alerts
-            </div>
-            {!state && !err && (
-              <p className="py-1 text-sm text-neutral-500">Loading…</p>
-            )}
-            {state?.rules.length === 0 && (
-              <p className="py-1 text-sm text-neutral-600">
-                None yet — add one above.
-              </p>
-            )}
-            <div className="space-y-1.5">
-              {state?.rules.map((r) => (
-                <div
-                  key={r.id}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-neutral-800/70 bg-neutral-950/60 px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm text-neutral-200">
-                      {r.name}{" "}
-                      <span className="text-xs text-neutral-500">{r.symbol}</span>
+                <div className="relative">
+                  <input
+                    value={picked ? `${picked.name} (${picked.symbol})` : q}
+                    onChange={(e) => {
+                      setPicked(null);
+                      setQ(e.target.value);
+                    }}
+                    placeholder="Search a ticker or company…"
+                    className={`${input} w-full px-3 py-1.5`}
+                  />
+                  {results.length > 0 && !picked && (
+                    <div className="absolute z-40 mt-1 w-full overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 shadow-xl">
+                      {results.map((r, i) => (
+                        <button
+                          key={`${r.symbol}-${i}`}
+                          onClick={() => {
+                            setPicked({ symbol: r.symbol, name: r.name });
+                            setResults([]);
+                          }}
+                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-neutral-800"
+                        >
+                          <span className="min-w-0 truncate text-sm">{r.name}</span>
+                          <span className="shrink-0 text-xs text-neutral-500">
+                            {r.symbol}
+                          </span>
+                        </button>
+                      ))}
                     </div>
-                    <div className="text-xs text-neutral-500">{condLabel(r)}</div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Toggle
-                      on={r.enabled}
-                      onChange={async () =>
-                        setState(await api.alertUpdate(r.id, { enabled: !r.enabled }))
-                      }
-                    />
-                    <button
-                      onClick={async () => setState(await api.alertDelete(r.id))}
-                      aria-label={`Delete ${r.symbol} alert`}
-                      className="px-1 text-neutral-500 transition hover:text-rose-400"
-                    >
-                      ×
-                    </button>
-                  </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Recent triggers */}
-          {state && state.events.length > 0 && (
-            <div className="border-b border-neutral-800 px-4 py-3">
-              <div className="mb-1.5 text-xs font-semibold text-neutral-400">
-                Recent triggers
-              </div>
-              <div className="space-y-1.5">
-                {state.events.slice(0, 6).map((e) => (
-                  <div key={e.id} className="text-xs leading-relaxed">
-                    <span className="text-neutral-300">{e.message}</span>{" "}
-                    <span className="text-neutral-600">· {ago(e.ts)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Delivery */}
-          {settings && (
-            <div className="px-4 py-3">
-              <div className="mb-2 text-xs font-semibold text-neutral-400">
-                Delivery
-              </div>
-
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm text-neutral-300">Browser notifications</span>
-                {notifPerm === "granted" ? (
-                  <span className="text-xs text-emerald-400">On</span>
-                ) : notifPerm === "denied" ? (
-                  <span className="text-xs text-neutral-500">
-                    Blocked in browser settings
-                  </span>
-                ) : notifPerm === "unsupported" ? (
-                  <span className="text-xs text-neutral-500">Unsupported</span>
-                ) : (
-                  <button
-                    onClick={() =>
-                      Notification.requestPermission().then(() => setOpen(true))
-                    }
-                    className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:border-neutral-500"
+                <div className="mt-2 flex items-center gap-2">
+                  <select
+                    value={cond}
+                    onChange={(e) => setCond(e.target.value)}
+                    className={`${input} flex-1 px-2 py-1.5`}
                   >
-                    Enable
+                    {CONDITIONS.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label} {c.unit === "%" ? "%" : "a price"}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="relative w-24">
+                    <input
+                      value={threshold}
+                      onChange={(e) => setThreshold(e.target.value)}
+                      inputMode="decimal"
+                      placeholder={unit === "%" ? "3" : "250"}
+                      className={`${input} w-full py-1.5 pl-3 pr-7`}
+                    />
+                    <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-neutral-500">
+                      {unit}
+                    </span>
+                  </div>
+                  <button
+                    onClick={addRule}
+                    disabled={!picked || !(parseFloat(threshold) > 0)}
+                    className="rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 transition hover:bg-white disabled:cursor-default disabled:opacity-40"
+                  >
+                    Add
                   </button>
-                )}
+                </div>
               </div>
 
-              <div className="mt-3 flex items-center justify-between gap-2">
-                <span className="text-sm text-neutral-300">Email</span>
-                <Toggle
-                  on={settings.email_enabled}
-                  onChange={() => patchSettings({ email_enabled: !settings.email_enabled })}
-                />
+              {/* Your alerts → its own view */}
+              <div className="border-b border-neutral-800 px-4 py-3">
+                <button
+                  onClick={() => setView("rules")}
+                  className="flex w-full items-center justify-between rounded-lg border border-neutral-800 bg-neutral-950/60 px-3 py-2.5 text-left transition hover:border-neutral-700 hover:bg-neutral-800/40"
+                >
+                  <span className="text-sm text-neutral-200">Your alerts</span>
+                  <span className="flex items-center gap-2 text-xs text-neutral-500">
+                    {rules.length || "none"}
+                    <span aria-hidden>→</span>
+                  </span>
+                </button>
               </div>
-              {settings.email_enabled && (
-                <div className="mt-2 space-y-1.5">
-                  <div className="flex items-center gap-2">
+
+              {/* Delivery destinations */}
+              {settings && (
+                <div className="px-4 py-3">
+                  <div className="mb-1 text-xs font-semibold text-neutral-400">
+                    Delivery
+                  </div>
+                  <p className="mb-2.5 text-[11px] leading-snug text-neutral-600">
+                    Set your destinations here — then choose where each alert
+                    goes inside Your alerts.
+                  </p>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm text-neutral-300">
+                      Browser notifications
+                    </span>
+                    {notifPerm === "granted" ? (
+                      <span className="text-xs text-emerald-400">On</span>
+                    ) : notifPerm === "denied" ? (
+                      <span className="text-xs text-neutral-500">
+                        Blocked in browser settings
+                      </span>
+                    ) : notifPerm === "unsupported" ? (
+                      <span className="text-xs text-neutral-500">Unsupported</span>
+                    ) : (
+                      <button
+                        onClick={() =>
+                          Notification.requestPermission().then(() => setOpen(true))
+                        }
+                        className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:border-neutral-500"
+                      >
+                        Enable
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="mt-2.5 flex items-center gap-2">
                     <input
                       defaultValue={settings.email_to}
                       onBlur={(e) => patchSettings({ email_to: e.target.value })}
-                      placeholder="you@email.com"
-                      className="flex-1 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm placeholder:text-neutral-600 outline-none focus:border-neutral-600"
+                      placeholder="Email for alerts"
+                      className={`${input} flex-1 px-3 py-1.5`}
                     />
                     <button
                       onClick={() => runTest("email")}
@@ -442,38 +433,27 @@ export default function AlertsBell() {
                     </button>
                   </div>
                   {!state.email_configured && (
-                    <p className="text-[11px] leading-snug text-amber-400/90">
+                    <p className="mt-1 text-[11px] leading-snug text-amber-400/90">
                       The server needs SMTP secrets first (ask Claude for the
                       one-time setup).
                     </p>
                   )}
                   {testMsg.email && (
-                    <p className="text-[11px] text-neutral-400">{testMsg.email}</p>
+                    <p className="mt-1 text-[11px] text-neutral-400">{testMsg.email}</p>
                   )}
-                </div>
-              )}
 
-              <div className="mt-3 flex items-center justify-between gap-2">
-                <span className="text-sm text-neutral-300">Text message</span>
-                <Toggle
-                  on={settings.sms_enabled}
-                  onChange={() => patchSettings({ sms_enabled: !settings.sms_enabled })}
-                />
-              </div>
-              {settings.sms_enabled && (
-                <div className="mt-2 space-y-1.5">
-                  <div className="flex items-center gap-2">
+                  <div className="mt-2 flex items-center gap-2">
                     <input
                       defaultValue={settings.sms_number}
                       onBlur={(e) => patchSettings({ sms_number: e.target.value })}
-                      placeholder="555 123 4567"
+                      placeholder="Phone for texts"
                       inputMode="tel"
-                      className="flex-1 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm placeholder:text-neutral-600 outline-none focus:border-neutral-600"
+                      className={`${input} flex-1 px-3 py-1.5`}
                     />
                     <select
                       value={settings.sms_carrier}
                       onChange={(e) => patchSettings({ sms_carrier: e.target.value })}
-                      className="rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm outline-none focus:border-neutral-600"
+                      className={`${input} px-2 py-1.5`}
                     >
                       {state.sms_carriers.map((c) => (
                         <option key={c} value={c}>
@@ -494,97 +474,208 @@ export default function AlertsBell() {
                       Test
                     </button>
                   </div>
-                  <p className="text-[11px] leading-snug text-neutral-600">
-                    Free carrier email→text gateway — delivery depends on your
-                    carrier (AT&T shut theirs down).
-                  </p>
                   {testMsg.sms && (
-                    <p className="text-[11px] text-neutral-400">{testMsg.sms}</p>
+                    <p className="mt-1 text-[11px] text-neutral-400">{testMsg.sms}</p>
                   )}
-                </div>
-              )}
 
-              <div className="mt-3 flex items-center justify-between gap-2">
-                <span className="text-sm text-neutral-300">Earnings heads-up</span>
-                <Toggle
-                  on={settings.earnings_alerts}
-                  onChange={() =>
-                    patchSettings({ earnings_alerts: !settings.earnings_alerts })
-                  }
-                />
-              </div>
-              {settings.earnings_alerts && (
-                <p className="mt-1.5 text-[11px] leading-snug text-neutral-600">
-                  A morning notice when a watchlist name reports today or
-                  tomorrow — delivered like your other alerts.
-                </p>
-              )}
-
-              {(
-                [
-                  {
-                    kind: "morning" as const,
-                    label: "☀️ Morning brief",
-                    enabled: settings.digest_enabled,
-                    time: settings.digest_time,
-                    enabledKey: "digest_enabled" as const,
-                    timeKey: "digest_time" as const,
-                    blurb:
-                      "Weekday mornings, before the open: futures, your watchlist pre-market, today's calendar, and what to watch.",
-                  },
-                  {
-                    kind: "evening" as const,
-                    label: "🌙 Evening wrap",
-                    enabled: settings.evening_enabled,
-                    time: settings.evening_time,
-                    enabledKey: "evening_enabled" as const,
-                    timeKey: "evening_time" as const,
-                    blurb:
-                      "Weekdays after the close: how the indices and your watchlist finished, and the story of the day.",
-                  },
-                ]
-              ).map((ed) => (
-                <div key={ed.kind}>
-                  <div className="mt-3 flex items-center justify-between gap-2">
-                    <span className="text-sm text-neutral-300">{ed.label}</span>
-                    <Toggle
-                      on={ed.enabled}
-                      onChange={() => patchSettings({ [ed.enabledKey]: !ed.enabled })}
-                    />
-                  </div>
-                  {ed.enabled && (
-                    <div className="mt-2 space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="time"
-                          defaultValue={ed.time}
-                          onBlur={(e) =>
-                            e.target.value &&
-                            patchSettings({ [ed.timeKey]: e.target.value })
+                  {(
+                    [
+                      {
+                        kind: "morning" as const,
+                        label: "☀️ Morning brief",
+                        enabled: settings.digest_enabled,
+                        time: settings.digest_time,
+                        enabledKey: "digest_enabled" as const,
+                        timeKey: "digest_time" as const,
+                        blurb:
+                          "Weekday mornings, before the open: futures, your watchlist pre-market, today's calendar, and what to watch.",
+                      },
+                      {
+                        kind: "evening" as const,
+                        label: "🌙 Evening wrap",
+                        enabled: settings.evening_enabled,
+                        time: settings.evening_time,
+                        enabledKey: "evening_enabled" as const,
+                        timeKey: "evening_time" as const,
+                        blurb:
+                          "Weekdays after the close: how the indices and your watchlist finished, and the story of the day.",
+                      },
+                    ]
+                  ).map((ed) => (
+                    <div key={ed.kind}>
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <span className="text-sm text-neutral-300">{ed.label}</span>
+                        <Toggle
+                          on={ed.enabled}
+                          onChange={() =>
+                            patchSettings({ [ed.enabledKey]: !ed.enabled })
                           }
-                          className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm outline-none focus:border-neutral-600"
                         />
-                        <span className="text-xs text-neutral-500">ET</span>
-                        <div className="flex-1" />
-                        <button
-                          onClick={() => sendDigestNow(ed.kind)}
-                          className="rounded-md border border-neutral-700 px-2 py-1.5 text-xs text-neutral-300 hover:border-neutral-500"
-                        >
-                          Send now
-                        </button>
                       </div>
-                      <p className="text-[11px] leading-snug text-neutral-600">
-                        {ed.blurb}
-                      </p>
-                      {testMsg[ed.kind] && (
-                        <p className="text-[11px] text-neutral-400">
-                          {testMsg[ed.kind]}
-                        </p>
+                      {ed.enabled && (
+                        <div className="mt-2 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="time"
+                              defaultValue={ed.time}
+                              onBlur={(e) =>
+                                e.target.value &&
+                                patchSettings({ [ed.timeKey]: e.target.value })
+                              }
+                              className={`${input} px-3 py-1.5`}
+                            />
+                            <span className="text-xs text-neutral-500">ET</span>
+                            <div className="flex-1" />
+                            <button
+                              onClick={() => sendDigestNow(ed.kind)}
+                              className="rounded-md border border-neutral-700 px-2 py-1.5 text-xs text-neutral-300 hover:border-neutral-500"
+                            >
+                              Send now
+                            </button>
+                          </div>
+                          <p className="text-[11px] leading-snug text-neutral-600">
+                            {ed.blurb}
+                          </p>
+                          {testMsg[ed.kind] && (
+                            <p className="text-[11px] text-neutral-400">
+                              {testMsg[ed.kind]}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ============== RULES VIEW ============== */}
+          {view === "rules" && (
+            <div className="px-4 py-3">
+              {rules.length === 0 && (
+                <p className="py-2 text-sm text-neutral-600">
+                  No alerts yet — add one from the main panel.
+                </p>
+              )}
+              <div className="space-y-1.5">
+                {rules.map((r) => (
+                  <div
+                    key={r.id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-neutral-800/70 bg-neutral-950/60 px-3 py-2"
+                  >
+                    <button
+                      onClick={() => setView(r.id)}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <div className="truncate text-sm text-neutral-200">
+                        {r.name}{" "}
+                        <span className="text-xs text-neutral-500">{r.symbol}</span>
+                      </div>
+                      <div className="text-xs text-neutral-500">
+                        {condLabel(r)}
+                        <span className="ml-1.5 text-neutral-600">
+                          ·{" "}
+                          {[
+                            r.channels?.browser && "browser",
+                            r.channels?.email && "email",
+                            r.channels?.sms && "text",
+                          ]
+                            .filter(Boolean)
+                            .join(" + ") || "nowhere"}
+                        </span>
+                      </div>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Toggle
+                        on={r.enabled}
+                        onChange={() => patchRule(r.id, { enabled: !r.enabled })}
+                      />
+                      <button
+                        onClick={async () => setState(await api.alertDelete(r.id))}
+                        aria-label={`Delete ${r.symbol} alert`}
+                        className="px-1 text-neutral-500 transition hover:text-rose-400"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ============== DETAIL VIEW ============== */}
+          {detail && (
+            <div className="px-4 py-3">
+              <div className="mb-1 text-xs font-semibold text-neutral-400">
+                Send this alert via
+              </div>
+              {(
+                [
+                  { key: "browser" as const, label: "Browser notification" },
+                  { key: "email" as const, label: "Email" },
+                  { key: "sms" as const, label: "Text message" },
+                ]
+              ).map((ch) => (
+                <div
+                  key={ch.key}
+                  className="mt-2 flex items-center justify-between gap-2"
+                >
+                  <span className="text-sm text-neutral-300">{ch.label}</span>
+                  <Toggle
+                    on={!!detail.channels?.[ch.key]}
+                    onChange={() =>
+                      patchRule(detail.id, {
+                        channels: {
+                          browser: !!detail.channels?.browser,
+                          email: !!detail.channels?.email,
+                          sms: !!detail.channels?.sms,
+                          [ch.key]: !detail.channels?.[ch.key],
+                        } as AlertChannels,
+                      })
+                    }
+                  />
                 </div>
               ))}
+              <p className="mt-1.5 text-[11px] leading-snug text-neutral-600">
+                Email and text go to the destinations set on the main panel.
+              </p>
+
+              {reportable(detail.symbol) && (
+                <>
+                  <div className="mt-4 mb-1 text-xs font-semibold text-neutral-400">
+                    Earnings
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm text-neutral-300">
+                      Heads-up when {detail.symbol} reports
+                    </span>
+                    <Toggle
+                      on={detail.earnings_alert}
+                      onChange={() =>
+                        patchRule(detail.id, {
+                          earnings_alert: !detail.earnings_alert,
+                        })
+                      }
+                    />
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-snug text-neutral-600">
+                    A morning notice (via the channels above) when {detail.symbol}{" "}
+                    reports earnings today or tomorrow.
+                  </p>
+                </>
+              )}
+
+              <button
+                onClick={async () => {
+                  setState(await api.alertDelete(detail.id));
+                  setView("rules");
+                }}
+                className="mt-4 w-full rounded-lg border border-neutral-800 px-3 py-1.5 text-xs text-neutral-400 transition hover:border-rose-900/50 hover:text-rose-300"
+              >
+                Delete this alert
+              </button>
             </div>
           )}
         </div>
@@ -599,7 +690,7 @@ export default function AlertsBell() {
               className="rounded-lg border border-amber-500/30 bg-neutral-900 px-4 py-3 text-sm text-neutral-200 shadow-2xl"
             >
               <div className="mb-0.5 text-xs font-semibold text-amber-400">
-                Price alert
+                {e.kind === "earnings" ? "Earnings heads-up" : "Price alert"}
               </div>
               {e.message}
             </div>

@@ -203,6 +203,8 @@ export type UniverseConfig = {
   max_per_class: number;
 };
 
+export type AlertChannels = { browser: boolean; email: boolean; sms: boolean };
+
 export type AlertRule = {
   id: string;
   symbol: string;
@@ -214,6 +216,8 @@ export type AlertRule = {
   active: boolean;
   last_fired: number;
   created: number;
+  channels: AlertChannels;
+  earnings_alert: boolean;
 };
 
 export type AlertEvent = {
@@ -226,6 +230,7 @@ export type AlertEvent = {
   value: number | null;
   price: number | null;
   message: string;
+  browser?: boolean; // false = this alert opted out of browser notifications
   ts: number;
 };
 
@@ -436,7 +441,13 @@ export const api = {
   }) => send<AlertsState>("POST", "/api/alerts", rule),
   alertUpdate: (
     id: string,
-    patch: { enabled?: boolean; threshold?: number; direction?: string },
+    patch: {
+      enabled?: boolean;
+      threshold?: number;
+      direction?: string;
+      channels?: AlertChannels;
+      earnings_alert?: boolean;
+    },
   ) => send<AlertsState>("PUT", `/api/alerts/${id}`, patch),
   alertDelete: (id: string) => send<AlertsState>("DELETE", `/api/alerts/${id}`),
   alertSettings: (patch: Partial<AlertSettings>) =>

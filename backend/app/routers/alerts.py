@@ -17,10 +17,18 @@ class RuleIn(BaseModel):
     direction: str = "any"  # any | up | down (move rules only)
 
 
+class RuleChannels(BaseModel):
+    browser: bool = True
+    email: bool = False
+    sms: bool = False
+
+
 class RulePatch(BaseModel):
     enabled: bool | None = None
     threshold: float | None = None
     direction: str | None = None
+    channels: RuleChannels | None = None
+    earnings_alert: bool | None = None
 
 
 class SettingsPatch(BaseModel):
@@ -126,7 +134,13 @@ def send_digest_now(request: Request, body: DigestSendIn | None = None):
 def update_alert(rule_id: str, patch: RulePatch, request: Request):
     user = auth.require_account(request)
     out = alerts.update_rule(
-        user["id"], rule_id, patch.enabled, patch.threshold, patch.direction
+        user["id"],
+        rule_id,
+        patch.enabled,
+        patch.threshold,
+        patch.direction,
+        patch.channels.model_dump() if patch.channels else None,
+        patch.earnings_alert,
     )
     if out is None:
         raise HTTPException(404, "no such alert")

@@ -19,7 +19,7 @@ import yfinance as yf
 
 from .. import universe
 from ..config import settings
-from . import alerts, users, watchlist
+from . import alerts
 
 log = logging.getLogger("earnings")
 
@@ -145,23 +145,22 @@ def warm(symbols: list[str]) -> None:
 
 
 def check_and_notify() -> int:
-    """For each account with earnings alerts on: a heads-up when a watchlist
-    name reports today or tomorrow. Runs mornings (ET); once per symbol+date."""
+    """A heads-up when a name with the per-alert earnings toggle reports today
+    or tomorrow — delivered via that alert's channels. Runs mornings (ET);
+    once per symbol+date."""
     et = universe._et_now()
     if not (7 <= et.hour < 10) or et.weekday() >= 5:
         return 0
-    today = date.today()
     sent = 0
     for uid in alerts.user_ids():
         try:
-            cfg = alerts.get_state(uid)["settings"]
-            if not cfg.get("earnings_alerts"):
+            watch = alerts.earnings_watch(uid)  # symbol -> merged channels
+            if not watch:
                 continue
-            symbols = sorted(
-                {s for l in watchlist.get_all(uid) for s in l["symbols"]}
-            )[:25]
             due = [
-                e for e in upcoming_for(symbols, days=2) if e["days_away"] in (0, 1)
+                e
+                for e in upcoming_for(sorted(watch), days=2)
+                if e["days_away"] in (0, 1)
             ]
             for e in due:
                 key = f"{e['symbol']}:{e['date']}"
@@ -170,7 +169,7 @@ def check_and_notify() -> int:
                 word = "today" if e["days_away"] == 0 else "tomorrow"
                 day_word = date.fromisoformat(e["date"]).strftime("%a, %b %-d")
                 message = f"{e['symbol']} reports earnings {word} ({day_word})"
-                alerts.record_earnings_notice(uid, key, message)
+                alerts.record_earnings_notice(uid, key, message, watch[e["symbol"]])
                 sent += 1
         except Exception as ex:
             log.warning("earnings notify for %s failed: %s", uid, ex)

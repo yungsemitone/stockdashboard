@@ -78,11 +78,20 @@ def _fresh_profile() -> dict:
 
 
 def _clean_profile(p: dict) -> dict:
-    return {
-        "rules": p.get("rules") or [],
-        "settings": {**DEFAULT_SETTINGS, **(p.get("settings") or {})},
-        "events": p.get("events") or [],
-    }
+    settings_ = {**DEFAULT_SETTINGS, **(p.get("settings") or {})}
+    rules = []
+    for r in p.get("rules") or []:
+        # Migrate pre-channel rules: keep behaving like the old global toggles.
+        if "channels" not in r:
+            r["channels"] = {
+                "browser": True,
+                "email": bool(settings_.get("email_enabled")),
+                "sms": bool(settings_.get("sms_enabled")),
+            }
+        if "earnings_alert" not in r:
+            r["earnings_alert"] = False
+        rules.append(r)
+    return {"rules": rules, "settings": settings_, "events": p.get("events") or []}
 
 
 def _read() -> dict:
@@ -227,6 +236,9 @@ def create_rule(
         "active": False,  # is the condition currently true? (edge-trigger state)
         "last_fired": 0.0,
         "created": time.time(),
+        # Where THIS alert goes (destinations live in the account settings).
+        "channels": {"browser": True, "email": False, "sms": False},
+        "earnings_alert": False,  # day-before heads-up when this name reports
     }
     with _lock:
         data = _read()
@@ -244,6 +256,8 @@ def update_rule(
     enabled: bool | None = None,
     threshold: float | None = None,
     direction: str | None = None,
+    channels: dict | None = None,
+    earnings_alert: bool | None = None,
 ) -> dict | None:
     with _lock:
         data = _read()
@@ -259,6 +273,13 @@ def update_rule(
             rule["active"] = False
         if direction in DIRECTIONS and rule["kind"] == "move":
             rule["direction"] = direction
+        if channels is not None:
+            rule["channels"] = {
+                k: bool(channels.get(k, rule.get("channels", {}).get(k)))
+                for k in ("browser", "email", "sms")
+            }
+        if earnings_alert is not None:
+            rule["earnings_alert"] = bool(earnings_alert)
         _write(data)
     return get_state(user_id)
 
@@ -317,9 +338,27 @@ def earnings_already_notified(user_id: str, key: str) -> bool:
     return bool(p and key in p["settings"].get("earnings_notified", {}))
 
 
-def record_earnings_notice(user_id: str, key: str, message: str) -> None:
+def earnings_watch(user_id: str) -> dict[str, dict]:
+    """symbol -> merged channels, for rules that asked for the earnings
+    heads-up (multiple rules on one name OR their channels together)."""
+    with _lock:
+        p = _read()["users"].get(user_id)
+    out: dict[str, dict] = {}
+    for r in (p or {}).get("rules", []):
+        if not r.get("earnings_alert"):
+            continue
+        ch = r.get("channels") or {}
+        agg = out.setdefault(
+            r["symbol"], {"browser": False, "email": False, "sms": False}
+        )
+        for k in agg:
+            agg[k] = agg[k] or bool(ch.get(k))
+    return out
+
+
+def record_earnings_notice(user_id: str, key: str, message: str, channels: dict) -> None:
     """Log an earnings heads-up as an event (bell/toasts/browser pick it up)
-    and deliver it via the account's email/text settings."""
+    and deliver it via the given channels (from that symbol's alert rules)."""
     now = time.time()
     event = {
         "id": uuid.uuid4().hex[:10],
@@ -331,6 +370,7 @@ def record_earnings_notice(user_id: str, key: str, message: str) -> None:
         "value": None,
         "price": None,
         "message": message,
+        "browser": bool(channels.get("browser", True)),
         "ts": now,
     }
     with _lock:
@@ -346,7 +386,7 @@ def record_earnings_notice(user_id: str, key: str, message: str) -> None:
         p["events"] = (p["events"] + [event])[-MAX_EVENTS:]
         cfg = dict(p["settings"])
         _write(data)
-    _notify([event], cfg, subject=f"Earnings heads-up: {event['symbol']}")
+    _notify_event(event, channels, cfg, subject=f"Earnings heads-up: {event['symbol']}")
 
 
 def mark_digest_sent(user_id: str, date_str: str, kind: str = "morning") -> None:
@@ -439,13 +479,13 @@ def check_all() -> int:
     quotes = market.snapshot_quotes(symbols)  # network — outside the lock
 
     now = time.time()
-    batches: list[tuple[list[dict], dict]] = []  # (fired events, that person's settings)
+    # (event, that rule's channels, that person's settings)
+    fired: list[tuple[dict, dict, dict]] = []
     changed = False
     with _lock:
         data = _read()  # re-read so concurrent edits aren't clobbered
         for prof in _everyone(data):
             cooldown = max(0, int(prof["settings"].get("cooldown_min", 60))) * 60
-            fired: list[dict] = []
             for rule in prof["rules"]:
                 if not rule.get("enabled"):
                     continue
@@ -453,6 +493,7 @@ def check_all() -> int:
                 active, value = _condition(rule, q)
                 was_active = bool(rule.get("active"))
                 if active and not was_active and (now - rule.get("last_fired", 0)) >= cooldown:
+                    channels = rule.get("channels") or {"browser": True}
                     event = {
                         "id": uuid.uuid4().hex[:10],
                         "rule_id": rule["id"],
@@ -463,22 +504,21 @@ def check_all() -> int:
                         "value": value,
                         "price": q.get("price"),
                         "message": _message(rule, q),
+                        "browser": bool(channels.get("browser", True)),
                         "ts": now,
                     }
                     prof["events"] = (prof["events"] + [event])[-MAX_EVENTS:]
                     rule["last_fired"] = now
-                    fired.append(event)
+                    fired.append((event, dict(channels), dict(prof["settings"])))
                 if active != was_active:
                     rule["active"] = active
                     changed = True
-            if fired:
-                batches.append((fired, dict(prof["settings"])))
-        if batches or changed:
+        if fired or changed:
             _write(data)
 
-    for fired, cfg in batches:
-        _notify(fired, cfg)
-    return sum(len(f) for f, _ in batches)
+    for event, channels, cfg in fired:
+        _notify_event(event, channels, cfg)
+    return len(fired)
 
 
 # --- delivery -----------------------------------------------------------------
@@ -528,32 +568,31 @@ def _sms_address(number: str, carrier: str) -> str | None:
     return f"{digits}@{gateway}" if gateway and len(digits) == 10 else None
 
 
-def _notify(events: list[dict], cfg: dict, subject: str | None = None) -> None:
+def _notify_event(
+    event: dict, channels: dict, cfg: dict, subject: str | None = None
+) -> None:
+    """Deliver one event via ITS channels; destinations come from the account
+    settings. (Browser delivery happens client-side off the event itself.)"""
     if not smtp_configured():
         return
-    subject = subject or (
-        f"Price alert: {events[0]['symbol']}"
-        if len(events) == 1
-        else f"{len(events)} price alerts"
-    )
-    if cfg.get("email_enabled") and cfg.get("email_to"):
+    subject = subject or f"Price alert: {event['symbol']}"
+    if channels.get("email") and cfg.get("email_to"):
         try:
-            body = "\n\n".join(e["message"] for e in events)
             _send_email(
-                [cfg["email_to"]], f"📈 {subject}", body + "\n\n— your Markets dashboard"
+                [cfg["email_to"]],
+                f"📈 {subject}",
+                event["message"] + "\n\n— your Markets dashboard",
             )
         except Exception as e:
             log.warning("alert email failed: %s", e)
-    if cfg.get("sms_enabled"):
+    if channels.get("sms"):
         addr = _sms_address(cfg.get("sms_number", ""), cfg.get("sms_carrier", ""))
         if addr:
             try:
-                # Texts keep the same wording as the bell/email (arrows, ± and
-                # all — Verizon delivers them fine; they can land in the
-                # phone's spam/junk list until the sender is marked not-spam).
-                # Gateways truncate around 160 chars.
-                body = "; ".join(e["message"] for e in events)
-                _send_email([addr], subject, body[:150])
+                # Texts keep the pretty wording; gateways truncate ~160 chars,
+                # and they can land in the phone's spam list until the sender
+                # is marked not-spam.
+                _send_email([addr], subject, event["message"][:150])
             except Exception as e:
                 log.warning("alert text failed: %s", e)
 
