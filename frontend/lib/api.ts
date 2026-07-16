@@ -260,6 +260,36 @@ export type EarningsItem = {
   days_away: number;
 };
 
+export type Holding = {
+  symbol: string;
+  name: string;
+  shares: number;
+  cost: number;
+  price: number | null;
+  change_pct: number | null;
+  value: number | null;
+  day_pl: number | null;
+  total_pl: number | null;
+  total_pl_pct: number | null;
+  alloc_pct: number | null;
+};
+
+export type Portfolio = {
+  holdings: Holding[];
+  totals: {
+    value: number;
+    cost: number;
+    day_pl: number;
+    day_pl_pct: number | null;
+    total_pl: number;
+    total_pl_pct: number | null;
+  };
+};
+
+export type PortfolioHistory = {
+  series: { t: string; portfolio: number; spx: number }[];
+};
+
 export type ConvertResult = {
   base: string;
   quote: string;
@@ -385,6 +415,13 @@ export const api = {
     ),
   digestSend: (kind: "morning" | "evening") =>
     send<{ ok: boolean; error?: string }>("POST", "/api/digest/send", { kind }),
+  portfolio: () => get<Portfolio>("/api/portfolio"),
+  portfolioUpsert: (h: { symbol: string; shares: number; cost: number }) =>
+    send<Portfolio>("POST", "/api/portfolio/holdings", h),
+  portfolioRemove: (symbol: string) =>
+    send<Portfolio>("DELETE", `/api/portfolio/holdings/${sym(symbol)}`),
+  portfolioHistory: (range: string) =>
+    get<PortfolioHistory>(`/api/portfolio/history?range=${range}`),
   earningsFor: (symbol: string) =>
     get<{ symbol: string; date: string | null }>(`/api/earnings/${sym(symbol)}`),
   earningsUpcoming: () =>

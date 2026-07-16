@@ -8,6 +8,7 @@ import SettingsMenu from "./SettingsMenu";
 
 const LINKS = [
   { href: "/", label: "Dashboard" },
+  { href: "/portfolio", label: "Portfolio" },
   { href: "/economy", label: "Economy" },
   { href: "/currency", label: "Currency" },
   { href: "/watchlist", label: "Watchlist" },

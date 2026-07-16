@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, type WatchList } from "@/lib/api";
 import { usePoll } from "@/lib/usePoll";
@@ -26,6 +26,39 @@ export default function WatchlistPage() {
 
   const current = lists?.find((l) => l.name === active) ?? null;
   const live = usePriceStream(current?.symbols ?? []);
+
+  // Sorting: alphabetical by default; the choice sticks per device.
+  const [sort, setSort] = useState("az");
+  useEffect(() => {
+    setSort(localStorage.getItem("watchlist-sort") || "az");
+  }, []);
+  const changeSort = (v: string) => {
+    setSort(v);
+    localStorage.setItem("watchlist-sort", v);
+  };
+  const sortedQuotes = useMemo(() => {
+    if (!current) return [];
+    const qs = [...current.quotes];
+    const pct = (q: (typeof qs)[number]) =>
+      liveQuote(q, live[q.symbol]).change_pct ?? 0;
+    const price = (q: (typeof qs)[number]) => liveQuote(q, live[q.symbol]).price ?? 0;
+    switch (sort) {
+      case "gainers":
+        qs.sort((a, b) => pct(b) - pct(a));
+        break;
+      case "losers":
+        qs.sort((a, b) => pct(a) - pct(b));
+        break;
+      case "price":
+        qs.sort((a, b) => price(b) - price(a));
+        break;
+      case "added":
+        break; // server order = the order they were added
+      default:
+        qs.sort((a, b) => a.symbol.localeCompare(b.symbol));
+    }
+    return qs;
+  }, [current, sort, live]);
 
   const createList = async () => {
     const name = newName.trim();
@@ -130,6 +163,18 @@ export default function WatchlistPage() {
               <h2 className="font-semibold">{current.name}</h2>
             )}
             <div className="flex items-center gap-3 text-xs">
+              <select
+                value={sort}
+                onChange={(e) => changeSort(e.target.value)}
+                className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-600"
+                title="Sort"
+              >
+                <option value="az">A–Z</option>
+                <option value="gainers">% gainers first</option>
+                <option value="losers">% losers first</option>
+                <option value="price">Price (high → low)</option>
+                <option value="added">Order added</option>
+              </select>
               <button
                 onClick={() => {
                   setRenaming(true);
@@ -155,7 +200,7 @@ export default function WatchlistPage() {
             </div>
           ) : (
             <div className="divide-y divide-neutral-800/70">
-              {current.quotes.map((q) => (
+              {sortedQuotes.map((q) => (
                 <div
                   key={q.symbol}
                   className="flex items-center justify-between px-5 py-3 hover:bg-neutral-800/40 transition"
