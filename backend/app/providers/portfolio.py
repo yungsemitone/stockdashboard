@@ -75,3 +75,60 @@ def remove(user_id: str, symbol: str) -> list[dict]:
         data["users"][user_id] = holdings
         _write(data)
         return [dict(h) for h in holdings]
+
+
+def valued(user_id: str) -> dict:
+    """Holdings enriched with live quotes plus portfolio totals/allocation —
+    used by the portfolio API and the daily briefs."""
+    from .. import universe
+    from . import market
+
+    holdings = get(user_id)
+    symbols = [h["symbol"] for h in holdings]
+    quotes = market.snapshot_quotes(symbols) if symbols else {}
+
+    rows: list[dict] = []
+    for h in holdings:
+        q = quotes.get(h["symbol"]) or {}
+        price = q.get("price")
+        change = q.get("change")
+        rows.append(
+            {
+                "symbol": h["symbol"],
+                "name": q.get("name") or universe.name_for(h["symbol"]),
+                "shares": h["shares"],
+                "cost": h["cost"],
+                "price": price,
+                "change_pct": q.get("change_pct"),
+                "value": price * h["shares"] if price is not None else None,
+                "day_pl": change * h["shares"] if change is not None else None,
+                "total_pl": (price - h["cost"]) * h["shares"] if price is not None else None,
+                "total_pl_pct": ((price - h["cost"]) / h["cost"] * 100)
+                if price is not None and h["cost"]
+                else None,
+            }
+        )
+
+    total_value = sum(r["value"] for r in rows if r["value"] is not None)
+    total_cost = sum(r["shares"] * r["cost"] for r in rows)
+    day_pl = sum(r["day_pl"] for r in rows if r["day_pl"] is not None)
+    prev_value = total_value - day_pl
+    for r in rows:
+        r["alloc_pct"] = (
+            r["value"] / total_value * 100 if r["value"] and total_value else None
+        )
+    rows.sort(key=lambda r: -(r["value"] or 0))
+
+    return {
+        "holdings": rows,
+        "totals": {
+            "value": total_value,
+            "cost": total_cost,
+            "day_pl": day_pl,
+            "day_pl_pct": (day_pl / prev_value * 100) if prev_value else None,
+            "total_pl": total_value - total_cost,
+            "total_pl_pct": ((total_value - total_cost) / total_cost * 100)
+            if total_cost
+            else None,
+        },
+    }
